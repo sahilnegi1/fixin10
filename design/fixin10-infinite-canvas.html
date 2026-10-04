@@ -1,0 +1,1564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="color-scheme" content="light">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FixIn10 - Infinite Canvas</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #111110; --bg-subtle: #191918; --surface: #1e1e1d; --surface-raised: #252524;
+    --border: rgba(255,255,255,0.06); --border-hover: rgba(255,255,255,0.12);
+    --accent: #c89b6c; --text: #e8e6e3; --text-secondary: rgba(232,230,227,0.6); --text-tertiary: rgba(232,230,227,0.32);
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.35), 0 2px 6px rgba(0,0,0,0.25);
+    --shadow-lg: 0 12px 40px rgba(0,0,0,0.45), 0 4px 12px rgba(0,0,0,0.3);
+    --shadow-drag: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1.5px var(--accent);
+    --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px;
+    --font-sans: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-mono: "SF Mono", "Fira Code", "JetBrains Mono", "Cascadia Code", monospace;
+    --note-bg: #2a2520; --note-border: rgba(200,155,108,0.2);
+    --transition-fast: 120ms cubic-bezier(0.25, 0.1, 0.25, 1);
+    --transition-normal: 200ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); font-family: var(--font-sans); color: var(--text); user-select: none; -webkit-user-select: none; -webkit-font-smoothing: antialiased; }
+
+  body::after { content: ''; position: fixed; inset: 0; z-index: 9999; pointer-events: none; opacity: 0.035; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); background-size: 512px 512px; mix-blend-mode: overlay; }
+
+  .canvas-viewport { position: fixed; inset: 0; overflow: hidden; cursor: grab; --grid-color: rgba(255,255,255,0.04); }
+  .canvas-viewport.panning { cursor: grabbing; }
+  .canvas-world { position: absolute; left: 0; top: 0; width: 20000px; height: 20000px; transform-origin: 0 0; will-change: transform; }
+  .canvas-el { position: absolute; cursor: grab; transition: box-shadow var(--transition-normal), transform var(--transition-fast); }
+  .canvas-el:hover { z-index: 10; }
+  .canvas-el.dragging { cursor: grabbing; z-index: 999; box-shadow: var(--shadow-drag) !important; transform: scale(1.01); transition: none; }
+
+  .section-header { position: absolute; pointer-events: none; display: flex; align-items: center; gap: 16px; white-space: nowrap; }
+  .section-header .section-num { font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.08em; color: var(--accent); opacity: 0.8; }
+  .section-header .section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-tertiary); }
+  .section-header .section-line { flex: none; width: 48px; height: 1px; background: linear-gradient(90deg, var(--accent) 0%, transparent 100%); opacity: 0.3; }
+
+  .canvas-title { position: absolute; pointer-events: none; font-weight: 700; line-height: 1.1; letter-spacing: -0.025em; color: var(--text); }
+  .canvas-text { position: absolute; line-height: 1.7; letter-spacing: 0.005em; color: var(--text-secondary); min-width: 200px; max-width: 560px; white-space: pre-wrap; word-break: break-word; }
+
+  .canvas-tag { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 100px; font-size: 12px; font-weight: 500; letter-spacing: 0.02em; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border); backdrop-filter: blur(8px); white-space: nowrap; }
+  .canvas-tag .tag-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+
+  .context-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; min-width: 220px; }
+  .context-card .card-head { padding: 16px 20px 12px; display: flex; align-items: center; gap: 10px; }
+  .context-card .card-head .head-indicator { width: 3px; height: 16px; border-radius: 2px; background: var(--accent); flex-shrink: 0; }
+  .context-card .card-head h3 { font-size: 13px; font-weight: 600; letter-spacing: 0.01em; color: var(--text); }
+  .context-card .card-content { padding: 0 20px 20px; font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
+
+  .ds-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+  .ds-card .ds-head { padding: 16px 20px 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-tertiary); }
+  .ds-card .ds-body { padding: 0 20px 20px; }
+
+  .color-swatch-group { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 20px; }
+  .swatch-item { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  .swatch-circle { width: 56px; height: 56px; border-radius: 50%; box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.08); }
+  .swatch-name { font-size: 10px; font-weight: 500; color: var(--text-secondary); text-align: center; }
+  .swatch-hex { font-family: var(--font-mono); font-size: 9px; color: var(--text-tertiary); text-align: center; }
+
+  .canvas-note { background: var(--note-bg); border: 1px solid var(--note-border); border-radius: var(--radius-md); padding: 16px 18px; min-width: 200px; max-width: 320px; box-shadow: var(--shadow-sm); }
+  .canvas-note .note-tag { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); opacity: 0.7; margin-bottom: 8px; }
+  .canvas-note .note-body { font-size: 13px; line-height: 1.65; color: var(--text-secondary); }
+
+  .design-page { background: #fff; border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-lg); }
+  .design-page .page-content { width: 100%; height: 100%; overflow: hidden; }
+  .page-label { position: absolute; bottom: -32px; left: 0; font-size: 11px; font-weight: 500; color: var(--text-tertiary); white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+  .page-label .label-num { font-family: var(--font-mono); font-size: 10px; color: var(--accent); opacity: 0.6; }
+
+  .canvas-diagram { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
+  .canvas-diagram .diagram-content { width: 100%; height: 100%; padding: 20px; }
+  .flow-chip { display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 999px; background: var(--surface-raised); border: 1px solid var(--border); font-size: 12.5px; color: var(--text-secondary); white-space: nowrap; }
+  .flow-arr { color: var(--accent); font-size: 14px; opacity: 0.8; }
+
+  .zoom-controls { position: fixed; bottom: 24px; right: 24px; display: flex; align-items: center; gap: 1px; z-index: 100; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-md); }
+  .zoom-btn { width: 36px; height: 36px; background: transparent; border: none; color: var(--text-secondary); font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .zoom-btn:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+  .zoom-label { min-width: 50px; height: 36px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+  .coord-indicator { position: fixed; bottom: 28px; left: 24px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: var(--text-tertiary); z-index: 100; padding: 4px 10px; background: rgba(17,17,16,0.85); border: 1px solid var(--border); border-radius: var(--radius-sm); backdrop-filter: blur(12px); }
+  .kbd-hint { position: fixed; top: 20px; right: 24px; z-index: 100; font-size: 10px; color: var(--text-tertiary); display: flex; gap: 12px; opacity: 0; transition: opacity 0.4s ease; pointer-events: none; }
+  .canvas-viewport:hover ~ .kbd-hint { opacity: 1; }
+  .kbd-hint kbd { font-family: var(--font-mono); padding: 2px 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; font-size: 10px; }
+
+  /* ═══════════════ SCREEN KIT (390x844, direction: Neighbour) ═══════════════ */
+  .scr { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; background: var(--s-bg); color: var(--s-ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-size: 15px; line-height: 1.4; overflow: hidden; }
+  .scr-a { --s-bg:#F7F6F0; --s-surface:#FFFFFF; --s-ink:#1F1B16; --s-muted:#6E675C; --s-border:#E7E2D6; --s-accent:#146B52; --s-accent-ink:#FFFFFF; --s-accent-soft:#E1EFE8; --s-accent-deep:#0F5741; --s-r-card:16px; --s-r-btn:14px; --s-r-chip:999px; --s-card-border:1px solid var(--s-border); --s-card-shadow:none; --s-serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif; }
+
+  .s-status { flex: 0 0 50px; padding: 12px 24px 0; display: flex; align-items: flex-start; justify-content: space-between; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--s-ink); }
+  .s-status svg { width: 16px; height: 10px; fill: var(--s-ink); }
+  .s-status .bat { width: 24px; }
+  .s-status.on-accent { color: #fff; }
+  .s-status.on-accent svg { fill: #fff; }
+  .s-ind { flex: 0 0 22px; position: relative; }
+  .s-ind::after { content: ''; position: absolute; left: 50%; bottom: 7px; transform: translateX(-50%); width: 120px; height: 4px; border-radius: 999px; background: var(--s-ink); opacity: 0.85; }
+  .s-ind.light::after { background: #fff; }
+  .s-cont { flex: 1 1 auto; overflow: hidden; padding: 2px 0 10px; }
+
+  .s-hd { padding: 6px 20px 0; }
+  .s-hdtop { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; }
+  .s-loc { display: inline-flex; align-items: center; gap: 5px; color: var(--s-muted); font-size: 12.5px; font-weight: 500; }
+  .s-loc svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+  .s-icb { width: 36px; height: 36px; border-radius: 999px; background: var(--s-surface); border: var(--s-card-border); box-shadow: var(--s-card-shadow); display: grid; place-items: center; color: var(--s-ink); }
+  .s-icb svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+  .s-hello { margin: 0 0 3px; font-size: 12.5px; color: var(--s-muted); }
+  .s-h1 { margin: 0 0 6px; font-family: var(--s-serif); font-size: 25px; line-height: 1.15; letter-spacing: -0.02em; font-weight: 600; color: var(--s-ink); }
+  .s-sub { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--s-muted); max-width: 36ch; }
+  .s-label2 { display: block; font-size: 12px; font-weight: 600; color: var(--s-muted); margin: 20px 0 8px; letter-spacing: 0.02em; }
+
+  .s-sect { padding: 16px 20px 0; }
+  .s-caps { display: block; margin: 0 0 8px; font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--s-muted); }
+
+  .s-svc { position: relative; display: grid; grid-template-columns: 42px 1fr; gap: 11px; align-items: center; background: var(--s-surface); border: var(--s-card-border); box-shadow: var(--s-card-shadow); border-radius: var(--s-r-card); padding: 12px 36px 12px 12px; margin-bottom: 9px; }
+  .s-svc-ic { width: 42px; height: 42px; border-radius: 13px; background: var(--s-accent-soft); color: var(--s-accent-deep); display: grid; place-items: center; }
+  .s-svc-ic svg { width: 21px; height: 21px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+  .s-nm { display: block; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--s-ink); }
+  .s-ds { display: block; font-size: 12.5px; color: var(--s-muted); margin-top: 1px; }
+  .s-pr { display: block; margin-top: 3px; font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace; font-size: 11.5px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+  .s-ck { position: absolute; top: 11px; right: 11px; width: 19px; height: 19px; border-radius: 50%; background: var(--s-accent); color: var(--s-accent-ink); display: none; place-items: center; }
+  .s-ck svg { width: 10px; height: 10px; stroke: currentColor; fill: none; stroke-width: 2.4; }
+  .s-sel { border-color: var(--s-accent) !important; box-shadow: 0 0 0 1px var(--s-accent), var(--s-card-shadow) !important; }
+  .s-sel .s-ck { display: grid; }
+  .s-tagI { position: absolute; top: 11px; right: 11px; font-size: 10px; font-weight: 600; color: var(--s-accent-deep); background: var(--s-accent-soft); border-radius: 999px; padding: 3px 8px; }
+
+  .s-btn { width: 100%; min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--s-accent); color: var(--s-accent-ink); border-radius: var(--s-r-btn); font-size: 15px; font-weight: 600; letter-spacing: 0.005em; }
+  .s-btn.ghost { background: transparent; color: var(--s-ink); border: 1px solid var(--s-border); }
+  .s-btn.tint { background: var(--s-accent-soft); color: var(--s-accent-deep); }
+
+  .s-pro { display: grid; grid-template-columns: 40px 1fr auto; gap: 11px; align-items: center; padding: 10px 0; border-top: 1px solid var(--s-border); }
+  .s-pro:first-of-type { border-top: 0; }
+  .s-avat { width: 40px; height: 40px; border-radius: 50%; background: var(--s-accent-soft); color: var(--s-accent-deep); display: grid; place-items: center; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; flex: none; }
+  .s-pnm { font-size: 14px; font-weight: 600; letter-spacing: -0.005em; color: var(--s-ink); }
+  .s-pds { font-size: 12px; color: var(--s-muted); margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+  .s-pds svg { width: 11px; height: 11px; fill: var(--s-accent); flex: none; }
+  .s-chip { font-size: 10.5px; font-weight: 600; color: var(--s-accent-deep); background: var(--s-accent-soft); border-radius: var(--s-r-chip); padding: 4px 9px; white-space: nowrap; }
+
+  .s-tabbar { flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); padding: 6px 6px 0; border-top: 1px solid var(--s-border); background: var(--s-surface); }
+  .s-tab { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 7px 0 8px; color: var(--s-muted); font-size: 10px; letter-spacing: 0.02em; }
+  .s-tab svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+  .s-tab.on { color: var(--s-ink); font-weight: 600; }
+  .s-tab.on svg { stroke-width: 2; }
+
+  .s-bk-hd { display: flex; align-items: center; gap: 12px; padding: 8px 20px 14px; }
+  .s-back { width: 38px; height: 38px; border-radius: 999px; background: var(--s-surface); border: var(--s-card-border); box-shadow: var(--s-card-shadow); display: grid; place-items: center; color: var(--s-ink); flex: none; }
+  .s-back svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.9; }
+  .s-bk-h1 { font-family: var(--s-serif); font-size: 21px; letter-spacing: -0.015em; font-weight: 600; margin: 0; color: var(--s-ink); }
+  .s-card { background: var(--s-surface); border: var(--s-card-border); box-shadow: var(--s-card-shadow); border-radius: var(--s-r-card); padding: 14px; margin-bottom: 10px; }
+  .s-crow { display: flex; align-items: center; gap: 11px; }
+  .s-crow .grow { flex: 1; min-width: 0; }
+  .s-crow .right { text-align: right; flex: none; }
+  .s-hr { height: 1px; background: var(--s-border); margin: 11px 0 5px; }
+  .s-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 5px 0; font-size: 13.5px; color: var(--s-muted); }
+  .s-line b { color: var(--s-ink); font-weight: 600; }
+  .s-tot { display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid var(--s-border); margin-top: 6px; padding-top: 10px; }
+  .s-tot .k { font-size: 14px; font-weight: 600; color: var(--s-ink); }
+  .s-tot .v { font-size: 19px; font-weight: 600; color: var(--s-ink); }
+  .s-mono { font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .s-change { font-size: 12px; font-weight: 500; color: var(--s-ink); text-decoration: underline; text-underline-offset: 3px; }
+  .s-note { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; line-height: 1.5; color: var(--s-muted); padding: 2px 2px 0; }
+  .s-note svg { width: 14px; height: 14px; flex: none; stroke: var(--s-muted); fill: none; stroke-width: 1.7; margin-top: 1px; }
+  .s-mini-ic { width: 34px; height: 34px; border-radius: 11px; background: var(--s-accent-soft); color: var(--s-accent-deep); display: grid; place-items: center; flex: none; }
+  .s-mini-ic svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+
+  /* splash / onboarding / auth */
+  .s-splash { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 13px; background: var(--s-accent); color: #fff; text-align: center; padding: 0 30px; }
+  .s-splash .mark { width: 64px; height: 64px; border-radius: 20px; background: rgba(255,255,255,0.16); display: grid; place-items: center; margin-bottom: 6px; }
+  .s-splash .mark svg { width: 32px; height: 32px; stroke: #fff; fill: none; stroke-width: 1.8; }
+  .s-splash .wm { font-family: var(--s-serif); font-size: 40px; font-weight: 600; letter-spacing: -0.02em; }
+  .s-splash .tg { font-size: 13.5px; opacity: 0.88; line-height: 1.55; }
+  .s-splash .bar { width: 120px; height: 4px; border-radius: 999px; background: rgba(255,255,255,0.25); margin-top: 26px; overflow: hidden; }
+  .s-splash .bar i { display: block; width: 42%; height: 100%; background: #fff; border-radius: 999px; }
+
+  .s-ob { padding: 10px 24px 0; display: flex; flex-direction: column; flex: 1; }
+  .s-art { position: relative; height: 272px; border-radius: 20px; background: var(--s-accent-soft); overflow: hidden; }
+  .s-art .ring { position: absolute; border: 1.5px dashed color-mix(in oklab, var(--s-accent) 32%, transparent); border-radius: 50%; }
+  .s-art .big { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-52%); font-family: var(--s-serif); font-size: 112px; font-weight: 600; color: var(--s-accent-deep); letter-spacing: -0.04em; }
+  .s-art .dot { position: absolute; width: 44px; height: 44px; border-radius: 14px; background: var(--s-surface); display: grid; place-items: center; color: var(--s-accent-deep); box-shadow: 0 4px 14px rgba(31,27,22,0.08); }
+  .s-art .dot svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+
+  .s-auth { padding: 12px 24px 0; }
+  .s-field { display: flex; align-items: center; gap: 10px; background: var(--s-surface); border: 1.5px solid var(--s-border); border-radius: 14px; padding: 0 14px; min-height: 54px; }
+  .s-field.on { border-color: var(--s-accent); box-shadow: 0 0 0 1px var(--s-accent); }
+  .s-field .cc { font-family: ui-monospace, 'SF Mono', Consolas, monospace; font-size: 14px; font-weight: 600; color: var(--s-ink); padding-right: 10px; border-right: 1px solid var(--s-border); }
+  .s-field .val { font-family: ui-monospace, 'SF Mono', Consolas, monospace; font-size: 16px; color: var(--s-ink); letter-spacing: 0.03em; }
+  .s-field .hint { font-size: 13.5px; color: var(--s-muted); display: flex; align-items: center; gap: 8px; }
+  .s-field .hint svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+
+  .s-otp { display: flex; gap: 10px; }
+  .s-otp span { width: 54px; height: 62px; border-radius: 12px; border: 1.5px solid var(--s-border); background: var(--s-surface); display: grid; place-items: center; font-family: ui-monospace, 'SF Mono', Consolas, monospace; font-size: 24px; font-weight: 600; color: var(--s-ink); }
+  .s-otp span.on { border-color: var(--s-accent); box-shadow: 0 0 0 1px var(--s-accent); }
+  .s-otp span.empty::after { content: ''; width: 2px; height: 26px; background: var(--s-accent); border-radius: 2px; }
+
+  /* map */
+  .s-map { position: relative; border-radius: 16px; overflow: hidden; background: #E7EAE1; }
+  .s-map .rd { position: absolute; background: rgba(255,255,255,0.92); }
+  .s-map .rd.h { height: 9px; left: -5%; right: -5%; border-radius: 6px; }
+  .s-map .rd.v { width: 9px; top: -5%; bottom: -5%; border-radius: 6px; }
+  .s-map .blk { position: absolute; background: rgba(255,255,255,0.42); border-radius: 8px; }
+  .s-map .route { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .s-map .pin { position: absolute; width: 16px; height: 16px; border-radius: 50%; background: var(--s-accent); border: 3px solid #fff; box-shadow: 0 2px 8px rgba(31,27,22,0.25); }
+  .s-map .pin.home { background: var(--s-ink); }
+
+  .s-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; background: color-mix(in oklab, var(--s-border) 55%, transparent); border-radius: 12px; padding: 4px; }
+  .s-seg span { text-align: center; padding: 10px 0; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: var(--s-muted); }
+  .s-seg span.on { background: var(--s-surface); color: var(--s-ink); box-shadow: 0 1px 4px rgba(31,27,22,0.08); }
+
+  .s-chiprow { display: flex; gap: 8px; flex-wrap: wrap; }
+  .s-ch { padding: 9px 14px; border-radius: 999px; border: 1px solid var(--s-border); background: var(--s-surface); font-size: 13px; font-weight: 500; color: var(--s-ink); white-space: nowrap; }
+  .s-ch.on { border-color: var(--s-accent); box-shadow: 0 0 0 1px var(--s-accent); color: var(--s-accent-deep); background: var(--s-accent-soft); }
+  .s-ch.dim { color: var(--s-muted); background: transparent; }
+
+  .s-radio { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--s-border); flex: none; position: relative; background: var(--s-surface); }
+  .s-radio.on { border-color: var(--s-accent); }
+  .s-radio.on::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--s-accent); }
+  .s-payrow { display: flex; align-items: center; gap: 11px; padding: 12px 0; border-top: 1px solid var(--s-border); }
+  .s-payrow:first-child { border-top: 0; }
+  .s-payrow .ic { width: 34px; height: 34px; border-radius: 10px; background: var(--s-accent-soft); color: var(--s-accent-deep); display: grid; place-items: center; flex: none; }
+  .s-payrow .ic svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+  .s-payrow .t { flex: 1; }
+  .s-payrow .t b { display: block; font-size: 14px; font-weight: 600; color: var(--s-ink); }
+  .s-payrow .t span { font-size: 12px; color: var(--s-muted); }
+
+  .s-ring { position: relative; width: 172px; height: 172px; margin: 0 auto; }
+  .s-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .s-ring .mid { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+  .s-ring .mid .v { font-family: ui-monospace, 'SF Mono', Consolas, monospace; font-size: 30px; font-weight: 600; color: var(--s-ink); }
+  .s-ring .mid .l { font-size: 11px; color: var(--s-muted); margin-top: 2px; }
+  .s-timer { font-family: ui-monospace, 'SF Mono', Consolas, monospace; font-size: 44px; font-weight: 600; letter-spacing: -0.02em; color: var(--s-ink); text-align: center; font-variant-numeric: tabular-nums; }
+
+  .s-lift { box-shadow: 0 14px 34px rgba(31,27,22,0.12), 0 3px 10px rgba(31,27,22,0.06); border: 1px solid rgba(0,0,0,0); }
+  .s-steps { display: flex; align-items: center; gap: 8px; }
+  .s-steps .st { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--s-muted); white-space: nowrap; }
+  .s-steps .st.done { color: var(--s-accent-deep); font-weight: 600; }
+  .s-steps .dot2 { width: 8px; height: 8px; border-radius: 50%; background: var(--s-border); }
+  .s-steps .st.done .dot2 { background: var(--s-accent); }
+  .s-steps .bar2 { flex: 1; height: 1.5px; background: var(--s-border); border-radius: 2px; }
+
+  .s-actrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .s-act { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--s-ink); }
+  .s-act .b { width: 52px; height: 52px; border-radius: 50%; background: var(--s-surface); border: 1px solid var(--s-border); display: grid; place-items: center; color: var(--s-ink); }
+  .s-act .b svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+
+  .s-chat { flex: 1; overflow: hidden; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .s-msg { max-width: 82%; padding: 10px 13px; border-radius: 16px; font-size: 13.5px; line-height: 1.45; }
+  .s-msg.in { background: var(--s-surface); border: 1px solid var(--s-border); border-bottom-left-radius: 6px; color: var(--s-ink); }
+  .s-msg.out { background: var(--s-accent); color: var(--s-accent-ink); border-bottom-right-radius: 6px; align-self: flex-end; }
+  .s-msg .tm { display: block; font-size: 10px; opacity: 0.6; margin-top: 4px; font-family: ui-monospace, Consolas, monospace; }
+  .s-chatbar { display: flex; gap: 8px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--s-border); background: var(--s-surface); }
+  .s-chatbar .f { flex: 1; min-height: 44px; display: flex; align-items: center; padding: 0 16px; border-radius: 999px; background: color-mix(in oklab, var(--s-border) 40%, transparent); color: var(--s-muted); font-size: 13.5px; }
+  .s-chatbar .snd { width: 44px; height: 44px; border-radius: 50%; background: var(--s-accent); color: var(--s-accent-ink); display: grid; place-items: center; flex: none; }
+  .s-chatbar .snd svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+
+  .s-coupon { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1.5px dashed color-mix(in oklab, var(--s-accent) 45%, var(--s-border)); border-radius: 12px; background: var(--s-surface); margin-bottom: 9px; }
+  .s-coupon .ct { flex: 1; } .s-coupon .ct b { display: block; font-size: 13.5px; font-weight: 600; color: var(--s-ink); }
+  .s-coupon .ct span { font-size: 11.5px; color: var(--s-muted); }
+  .s-coupon .amt { font-family: ui-monospace, Consolas, monospace; font-weight: 600; font-size: 13px; color: var(--s-accent-deep); }
+  .s-plan { flex: 1; border: 1.5px solid var(--s-border); border-radius: 14px; padding: 14px 12px; text-align: center; background: var(--s-surface); }
+  .s-plan.on { border-color: var(--s-accent); box-shadow: 0 0 0 1px var(--s-accent); }
+  .s-plan .nm { font-size: 13px; font-weight: 600; color: var(--s-ink); }
+  .s-plan .pr { font-family: ui-monospace, Consolas, monospace; font-size: 18px; font-weight: 600; margin-top: 6px; color: var(--s-ink); }
+  .s-plan .pr small { font-size: 11px; color: var(--s-muted); font-weight: 400; }
+  .s-plan .tag2 { display: inline-block; margin-top: 8px; font-size: 10.5px; font-weight: 600; color: var(--s-accent-deep); background: var(--s-accent-soft); border-radius: 999px; padding: 3px 8px; }
+  .s-codebox { border: 1.5px dashed var(--s-accent); border-radius: 14px; padding: 16px; text-align: center; }
+  .s-codebox .cd { font-family: ui-monospace, Consolas, monospace; font-size: 26px; font-weight: 600; letter-spacing: 0.14em; color: var(--s-ink); }
+
+  .s-success { width: 72px; height: 72px; border-radius: 50%; background: var(--s-accent-soft); color: var(--s-accent-deep); display: grid; place-items: center; margin: 0 auto; }
+  .s-success svg { width: 34px; height: 34px; stroke: currentColor; fill: none; stroke-width: 2; }
+
+  .s-stars { display: flex; gap: 6px; }
+  .s-stars svg { width: 36px; height: 36px; fill: var(--s-border); }
+  .s-stars svg.f { fill: var(--s-accent); }
+
+  .s-sw { width: 46px; height: 28px; border-radius: 999px; background: var(--s-border); position: relative; flex: none; }
+  .s-sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.18); }
+  .s-sw.on { background: var(--s-accent); }
+  .s-sw.on::after { left: 21px; }
+
+  .s-nav { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--s-border); }
+  .s-nav.nt { border-top: 0; }
+  .s-nav .ic { width: 36px; height: 36px; border-radius: 11px; background: var(--s-accent-soft); color: var(--s-accent-deep); display: grid; place-items: center; flex: none; }
+  .s-nav .ic svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+  .s-nav .t { flex: 1; font-size: 14px; font-weight: 500; color: var(--s-ink); }
+  .s-nav .v { font-size: 12.5px; color: var(--s-muted); }
+  .s-nav .ch { color: var(--s-muted); display: grid; place-items: center; }
+  .s-nav .ch svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+
+  .s-tl { display: flex; flex-direction: column; }
+  .s-tl .r { display: flex; gap: 10px; }
+  .s-tl .left { display: flex; flex-direction: column; align-items: center; width: 12px; }
+  .s-tl .left .d2 { width: 9px; height: 9px; border-radius: 50%; background: var(--s-accent); margin-top: 4px; flex: none; }
+  .s-tl .left .d2.off { background: var(--s-border); }
+  .s-tl .left .ln { flex: 1; width: 1.5px; background: var(--s-border); margin: 2px 0; }
+  .s-tl .body2 { padding-bottom: 12px; } .s-tl .body2 b { display: block; font-size: 13px; font-weight: 600; color: var(--s-ink); }
+  .s-tl .body2 span { font-size: 11.5px; color: var(--s-muted); }
+
+  .s-incl { display: flex; gap: 9px; align-items: flex-start; padding: 7px 0; font-size: 13.5px; color: var(--s-ink); }
+  .s-incl svg { width: 16px; height: 16px; flex: none; margin-top: 1.5px; stroke: var(--s-accent); fill: none; stroke-width: 2.2; }
+  .s-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .s-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .s-tile { background: var(--s-surface); border: var(--s-card-border); box-shadow: var(--s-card-shadow); border-radius: 14px; padding: 13px; }
+  .s-fill { background: var(--s-accent); color: #fff; border: 1px solid transparent; box-shadow: none; }
+  .s-fill .s-ds { color: rgba(255,255,255,0.78); }
+  .s-fill .s-nm, .s-fill b, .s-fill .s-mono, .s-fill .s-pnm { color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="canvas-viewport" id="viewport">
+  <div class="canvas-world" id="world"></div>
+</div>
+
+<div class="zoom-controls">
+  <button class="zoom-btn" id="zoomOut" aria-label="Zoom out">&#8722;</button>
+  <div class="zoom-label" id="zoomLabel">100%</div>
+  <button class="zoom-btn" id="zoomIn" aria-label="Zoom in">+</button>
+  <button class="zoom-btn" id="zoomReset" title="Reset view" aria-label="Reset view">&#8962;</button>
+</div>
+
+<div class="coord-indicator" id="coordIndicator">0, 0</div>
+<div class="kbd-hint" id="kbdHint"></div>
+
+<!-- ═══════════ SCREEN TEMPLATES ═══════════ -->
+
+<template id="tpl-splash">
+  <div class="s-status on-accent"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont" style="display:flex;flex-direction:column;padding:0;">
+    <div class="s-splash">
+      <span class="mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></span>
+      <div class="wm">FixIn10</div>
+      <div class="tg">Home repairs, fixed in minutes.<br>Electricians, carpenters, plumbers.</div>
+      <div class="bar"><i></i></div>
+    </div>
+  </div>
+  <div class="s-ind light"></div>
+</template>
+
+<template id="tpl-onboard">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont" style="display:flex;flex-direction:column;padding:10px 0 0;">
+    <div class="s-ob">
+      <div class="s-art">
+        <span class="ring" style="left:50%;top:50%;width:216px;height:216px;transform:translate(-50%,-50%);"></span>
+        <span class="ring" style="left:50%;top:50%;width:152px;height:152px;transform:translate(-50%,-50%);"></span>
+        <span class="big">10</span>
+        <span class="dot" style="left:13%;top:16%;"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></span>
+        <span class="dot" style="right:11%;top:29%;"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.7l5.66 5.66a8 8 0 1 1-11.32 0z"/></svg></span>
+        <span class="dot" style="left:19%;bottom:14%;"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z"/></svg></span>
+      </div>
+      <div style="text-align:center;padding:26px 4px 0;">
+        <h1 class="s-h1" style="font-size:24px;">Pros at your door in 10.</h1>
+        <p class="s-sub" style="margin:0 auto;max-width:32ch;">Verified electricians, carpenters and plumbers. Tracked live, billed by the hour.</p>
+      </div>
+      <div style="display:flex;gap:6px;justify-content:center;margin-top:22px;">
+        <span style="width:18px;height:6px;border-radius:999px;background:var(--s-accent);"></span>
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--s-border);"></span>
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--s-border);"></span>
+      </div>
+      <div style="margin-top:auto;padding:0 0 16px;display:flex;flex-direction:column;gap:6px;">
+        <div class="s-btn">Get started</div>
+        <div style="text-align:center;font-size:13px;color:var(--s-muted);padding:10px;">Skip for now</div>
+      </div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-login">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-auth">
+      <h1 class="s-h1" style="font-size:25px;">What's your number?</h1>
+      <p class="s-sub">We'll send a one-time code to verify it's you.</p>
+      <span class="s-label2">Mobile number</span>
+      <div class="s-field on"><span class="cc">+91</span><span class="val">98765 43210</span></div>
+      <div class="s-btn" style="margin-top:18px;">Send OTP</div>
+      <p style="font-size:11.5px;color:var(--s-muted);line-height:1.6;margin-top:14px;">By continuing you agree to the Terms of Service and Privacy Policy.</p>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-otp">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-auth">
+      <span class="s-back" style="margin:0 0 16px;"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span>
+      <h1 class="s-h1" style="font-size:25px;">Enter the code</h1>
+      <p class="s-sub">Sent to <b style="color:var(--s-ink);">+91 98765 43210</b> · <span class="s-change">Change</span></p>
+      <div class="s-otp" style="margin-top:22px;"><span>4</span><span>8</span><span class="on empty"></span><span class="empty"></span></div>
+      <p style="font-size:12px;color:var(--s-muted);margin-top:12px;">We auto-read the code from your SMS.</p>
+      <div class="s-btn" style="margin-top:16px;">Verify</div>
+      <p style="font-size:12.5px;color:var(--s-muted);margin-top:16px;">Resend code in <span class="s-mono" style="color:var(--s-ink);">0:24</span></p>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-address">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-auth" style="padding-top:8px;">
+      <h1 class="s-h1" style="font-size:25px;">Where do you need help?</h1>
+      <div class="s-field" style="margin-top:16px;">
+        <span class="hint"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/></svg> Search area, street or landmark</span>
+      </div>
+      <div class="s-map" style="height:250px;margin-top:14px;">
+        <span class="rd h" style="top:26%;"></span>
+        <span class="rd h" style="top:64%;"></span>
+        <span class="rd v" style="left:27%;"></span>
+        <span class="rd v" style="left:74%;"></span>
+        <span class="blk" style="width:58px;height:42px;left:8%;top:36%;"></span>
+        <span class="blk" style="width:52px;height:40px;left:36%;top:8%;"></span>
+        <span class="blk" style="width:46px;height:56px;left:81%;top:70%;"></span>
+        <span class="blk" style="width:56px;height:34px;left:40%;top:74%;"></span>
+        <svg class="route" viewBox="0 0 390 250" preserveAspectRatio="none" aria-hidden="true"><path d="M82 178 C 140 150, 178 166, 224 118 S 300 78, 318 66" fill="none" stroke="var(--s-accent)" stroke-width="3.5" stroke-linecap="round" opacity="0.75"/></svg>
+        <span class="pin home" style="left:74px;top:170px;"></span>
+        <span class="pin" style="left:310px;top:58px;"></span>
+      </div>
+      <div style="margin-top:6px;">
+        <div class="s-nav nt"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span><span class="t">Use my current location</span><span class="ch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></span></div>
+        <div class="s-nav"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/></svg></span><span class="t">Home · 12th Main, Indiranagar</span><span class="ch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></span></div>
+      </div>
+      <div class="s-btn" style="margin-top:12px;">Confirm address</div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-home">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-hd">
+      <div class="s-hdtop">
+        <span class="s-loc"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.4-6.5-10a6.5 6.5 0 1 1 13 0c0 4.6-6.5 10-6.5 10z"/><circle cx="12" cy="11" r="2.3"/></svg>Indiranagar, Bengaluru</span>
+        <span class="s-icb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4H4v12h5l3 4 3-4h5z"/></svg></span>
+      </div>
+      <p class="s-hello">Good morning, Ananya</p>
+      <h1 class="s-h1">What needs fixing today?</h1>
+      <p class="s-sub">Verified electricians, carpenters and plumbers nearby. Typically matched in ~10 min.</p>
+    </div>
+    <div class="s-sect">
+      <span class="s-caps">Choose a service</span>
+      <div class="s-svc s-sel">
+        <span class="s-svc-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></span>
+        <span><span class="s-nm">Electrician</span><span class="s-ds">Wiring, fans and switches</span><span class="s-pr">from ₹249/hr</span></span>
+        <span class="s-ck"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span>
+      </div>
+      <div class="s-svc">
+        <span class="s-svc-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z"/></svg></span>
+        <span><span class="s-nm">Carpenter</span><span class="s-ds">Doors, shelves and fittings</span><span class="s-pr">from ₹229/hr</span></span>
+      </div>
+      <div class="s-svc">
+        <span class="s-svc-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.7l5.66 5.66a8 8 0 1 1-11.32 0z"/></svg></span>
+        <span><span class="s-nm">Plumber</span><span class="s-ds">Taps, leaks and drainage</span><span class="s-pr">from ₹219/hr</span></span>
+      </div>
+      <div class="s-btn">Continue with Electrician</div>
+    </div>
+    <div class="s-sect">
+      <span class="s-caps">Top pros near you</span>
+      <div class="s-pro">
+        <span class="s-avat">RK</span>
+        <span><span class="s-pnm">Rajesh Kumar</span><span class="s-pds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>4.9, 418 jobs</span></span>
+        <span class="s-chip">Available now</span>
+      </div>
+      <div class="s-pro">
+        <span class="s-avat">IS</span>
+        <span><span class="s-pnm">Imran Shaikh</span><span class="s-pds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>4.8, 256 jobs</span></span>
+        <span class="s-chip">Replies in ~5 min</span>
+      </div>
+    </div>
+  </div>
+  <div class="s-tabbar">
+    <span class="s-tab on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/></svg>Home</span>
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Bookings</span>
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/><circle cx="17" cy="14.5" r="1.2"/></svg>Wallet</span>
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.1 3.6-7 8-7s8 2.9 8 7"/></svg>Profile</span>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-servicelist">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-bk-hd"><span class="s-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span><p class="s-bk-h1">Electrician</p></div>
+    <div class="s-sect" style="padding-top:0;">
+      <div class="s-chiprow" style="margin-bottom:12px;"><span class="s-ch on">All</span><span class="s-ch">Quick fixes</span><span class="s-ch">Wiring</span><span class="s-ch">Fans</span></div>
+      <div class="s-svc">
+        <span class="s-svc-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></span>
+        <span><span class="s-nm">Switchboard &amp; sockets</span><span class="s-ds">45-90 min · most booked</span><span class="s-pr">₹249/hr</span></span>
+        <span class="s-tagI">Instant</span>
+      </div>
+      <div class="s-svc">
+        <span class="s-svc-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h9a3 3 0 1 0-3-3"/><path d="M3 12h13a3 3 0 1 1-3 3"/><path d="M3 16h6"/></svg></span>
+        <span><span class="s-nm">Fan install &amp; repair</span><span class="s-ds">30-60 min</span><span class="s-pr">₹229/hr</span></span>
+      </div>
+      <div class="s-svc">
+        <span class="s-svc-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span>
+        <span><span class="s-nm">Light &amp; lamp fitting</span><span class="s-ds">30-45 min</span><span class="s-pr">₹199/hr</span></span>
+        <span class="s-tagI">Instant</span>
+      </div>
+      <div class="s-svc">
+        <span class="s-svc-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="7" width="17" height="10" rx="3"/><path d="M22 10.5v3"/><path d="M11 9.8 9 12h4l-2 2.2"/></svg></span>
+        <span><span class="s-nm">Inverter &amp; fuse fix</span><span class="s-ds">45-90 min</span><span class="s-pr">₹249/hr</span></span>
+      </div>
+      <div class="s-svc">
+        <span class="s-svc-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/></svg></span>
+        <span><span class="s-nm">Doorbell &amp; video phone</span><span class="s-ds">60-90 min</span><span class="s-pr">₹349/hr</span></span>
+      </div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-servicedetail">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-bk-hd"><span class="s-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span><p class="s-bk-h1">Switchboard &amp; sockets</p></div>
+    <div class="s-sect" style="padding-top:0;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:var(--s-accent);" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>
+        <span class="s-mono" style="font-size:12.5px;color:var(--s-ink);">4.8</span>
+        <span style="font-size:12.5px;color:var(--s-muted);">2,300 jobs done</span>
+        <span class="s-chip" style="margin-left:auto;">~10 min match</span>
+      </div>
+      <p class="s-sub" style="max-width:none;">Flickering lights, dead sockets, tripping breakers. A verified electrician diagnoses the load and fixes it on the spot.</p>
+      <span class="s-caps" style="margin-top:16px;">What's included</span>
+      <div class="s-incl"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>Full check of wiring, load and earthing</div>
+      <div class="s-incl"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>Repair or replace sockets, switches, breakers</div>
+      <div class="s-incl"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>15-day service warranty on the fix</div>
+      <span class="s-caps" style="margin-top:14px;">How it's priced</span>
+      <div class="s-card" style="margin-bottom:10px;">
+        <div class="s-line" style="padding-top:0;">Hourly rate<b class="s-mono">₹249/hr</b></div>
+        <div class="s-line">Visit fee<span class="s-mono">₹49</span></div>
+        <p class="s-note" style="margin-top:6px;"><svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6z"/></svg>You pay only for hours actually worked.</p>
+      </div>
+      <div class="s-card">
+        <div class="s-crow">
+          <span class="s-avat">RK</span>
+          <span class="grow"><span class="s-pnm">Rajesh Kumar</span><span class="s-pds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>4.9, 418 jobs · top-rated nearby</span></span>
+          <span class="right"><span class="s-chip">~10 min away</span></span>
+        </div>
+      </div>
+      <div class="s-btn" style="margin-top:12px;">Continue</div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-schedule">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-bk-hd"><span class="s-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span><p class="s-bk-h1">When do you need it?</p></div>
+    <div class="s-sect" style="padding-top:0;">
+      <div class="s-seg" style="margin-bottom:16px;"><span class="on">Now · fastest</span><span>Schedule</span></div>
+      <span class="s-caps">Pick a day</span>
+      <div class="s-chiprow" style="margin-bottom:14px;"><span class="s-ch on">Today</span><span class="s-ch">Tue 7</span><span class="s-ch">Wed 8</span><span class="s-ch">Thu 9</span><span class="s-ch">Fri 10</span></div>
+      <span class="s-caps">Pick a window</span>
+      <div class="s-chiprow" style="margin-bottom:14px;"><span class="s-ch on">4:00-6:00 PM</span><span class="s-ch">6:00-8:00 PM</span><span class="s-ch">8:00-10:00 PM</span><span class="s-ch">Tomorrow 9:00-11:00 AM</span></div>
+      <p class="s-note" style="margin-bottom:12px;"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Estimated 2 hrs. You pay only for hours actually worked.</p>
+      <div class="s-nav"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.4-6.5-10a6.5 6.5 0 1 1 13 0c0 4.6-6.5 10-6.5 10z"/><circle cx="12" cy="11" r="2.3"/></svg></span><span class="t">Home · 12th Main, Indiranagar</span><span class="ch"><span class="s-change">Change</span></span></div>
+      <div class="s-btn" style="margin-top:12px;">Continue</div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-reviewpay">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-bk-hd"><span class="s-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span><p class="s-bk-h1">Review &amp; pay</p></div>
+    <div class="s-sect" style="padding-top:0;">
+      <div class="s-card">
+        <div class="s-crow">
+          <span class="s-mini-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></span>
+          <span class="grow"><span class="s-nm">Electrician · Switchboard repair</span><span class="s-ds">Today, 4:00-6:00 PM · 2 hr estimated</span></span>
+        </div>
+        <div class="s-hr"></div>
+        <div class="s-line">Hourly rate, 2 hr<span class="s-mono">₹498</span></div>
+        <div class="s-line">Visit fee<span class="s-mono">₹49</span></div>
+        <div class="s-line" style="color:var(--s-accent-deep);">Coupon FIRST50<span class="s-mono" style="color:var(--s-accent-deep);">-₹50</span></div>
+        <div class="s-tot"><span class="k">Estimate</span><span class="v s-mono">₹497</span></div>
+      </div>
+      <span class="s-caps">Pay with</span>
+      <div class="s-card" style="padding:4px 14px;margin-bottom:10px;">
+        <div class="s-payrow"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/></svg></span><span class="t"><b>UPI · Google Pay</b><span>ananya@okaxis</span></span><span class="s-radio on"></span></div>
+        <div class="s-payrow"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/></svg></span><span class="t"><b>UPI · PhonePe</b><span>ananya@ybl</span></span><span class="s-radio"></span></div>
+        <div class="s-payrow"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="3"/><circle cx="12" cy="12" r="3"/></svg></span><span class="t"><b>Cash after service</b><span>Pay the pro directly</span></span><span class="s-radio"></span></div>
+      </div>
+      <p class="s-note"><svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6z"/></svg>Payment is collected after the service, on the final bill. Free cancellation up to 1 hour before your slot.</p>
+      <div class="s-btn" style="margin-top:12px;">Confirm booking</div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-matching">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-sect" style="padding-top:26px;text-align:center;">
+      <div class="s-ring" style="margin-top:8px;">
+        <svg viewBox="0 0 172 172" aria-hidden="true"><circle cx="86" cy="86" r="78" fill="none" stroke="var(--s-border)" stroke-width="10"/><circle cx="86" cy="86" r="78" fill="none" stroke="var(--s-accent)" stroke-width="10" stroke-linecap="round" stroke-dasharray="318 490"/></svg>
+        <div class="mid"><div><div class="v">64%</div><div class="l">matching</div></div></div>
+      </div>
+      <h1 class="s-h1" style="margin-top:18px;">Finding pros near you</h1>
+      <p class="s-sub" style="margin:0 auto;max-width:32ch;">Usually takes under 10 minutes. We've pinged 3 pros around Indiranagar.</p>
+    </div>
+    <div class="s-sect">
+      <span class="s-caps">Offers sent</span>
+      <div class="s-pro"><span class="s-avat">RK</span><span><span class="s-pnm">Rajesh Kumar</span><span class="s-pds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>4.9 · 1.2 km away</span></span><span class="s-chip">Offering · 0:28</span></div>
+      <div class="s-pro"><span class="s-avat">IS</span><span><span class="s-pnm">Imran Shaikh</span><span class="s-pds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>4.8 · 2.1 km away</span></span><span class="s-chip">Offering · 0:19</span></div>
+      <div class="s-pro"><span class="s-avat">LN</span><span><span class="s-pnm">Lakshmi Nair</span><span class="s-pds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>4.9 · 3.4 km away</span></span><span class="s-chip" style="background:transparent;border:1px solid var(--s-border);color:var(--s-muted);">Pinged</span></div>
+      <div style="text-align:center;padding:16px 0 0;"><span class="s-change">Cancel search</span></div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-tracking">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-bk-hd"><span class="s-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span><p class="s-bk-h1">Rajesh is on the way</p></div>
+    <div class="s-sect" style="padding-top:0;">
+      <div class="s-map" style="height:352px;">
+        <span class="rd h" style="top:24%;"></span>
+        <span class="rd h" style="top:62%;"></span>
+        <span class="rd v" style="left:24%;"></span>
+        <span class="rd v" style="left:70%;"></span>
+        <span class="blk" style="width:56px;height:40px;left:7%;top:33%;"></span>
+        <span class="blk" style="width:48px;height:38px;left:33%;top:6%;"></span>
+        <span class="blk" style="width:44px;height:52px;left:80%;top:68%;"></span>
+        <span class="blk" style="width:52px;height:32px;left:38%;top:72%;"></span>
+        <svg class="route" viewBox="0 0 390 352" preserveAspectRatio="none" aria-hidden="true"><path d="M84 250 C 140 220, 170 236, 214 176 S 292 112, 312 96" fill="none" stroke="var(--s-accent)" stroke-width="3.5" stroke-linecap="round" opacity="0.75"/></svg>
+        <span style="position:absolute;left:212px;top:118px;background:var(--s-surface);border-radius:999px;padding:5px 10px;font-size:11px;font-weight:600;color:var(--s-ink);box-shadow:0 2px 10px rgba(31,27,22,0.14);">Arrives ~6 min</span>
+        <span class="pin home" style="left:76px;top:242px;"></span>
+        <span class="pin" style="left:306px;top:90px;"></span>
+      </div>
+      <div class="s-steps" style="margin-top:12px;">
+        <span class="st done"><span class="dot2"></span>Matched</span><span class="bar2"></span>
+        <span class="st done"><span class="dot2"></span>On the way</span><span class="bar2"></span>
+        <span class="st"><span class="dot2"></span>Arrived</span>
+      </div>
+      <div class="s-card s-lift" style="margin-top:12px;">
+        <div class="s-crow">
+          <span class="s-avat">RK</span>
+          <span class="grow"><span class="s-pnm">Rajesh Kumar</span><span class="s-pds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>4.9, 418 jobs · Electrician</span></span>
+          <span class="right"><span class="s-chip">KA 05 MX 4421</span></span>
+        </div>
+        <div class="s-hr"></div>
+        <div class="s-actrow">
+          <span class="s-act"><span class="b"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.96.3 1.9.6 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.85.5 2.8.6a2 2 0 0 1 1.8 2.1z"/></svg></span>Call</span>
+          <span class="s-act"><span class="b"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4H4v12h5l3 4 3-4h5z"/></svg></span>Chat</span>
+          <span class="s-act"><span class="b"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 3v13M8 7l4-4 4 4"/></svg></span>Share</span>
+          <span class="s-act"><span class="b"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6z"/></svg></span>SOS</span>
+        </div>
+      </div>
+      <p class="s-note" style="margin-top:10px;"><svg viewBox="0 0 24 24"><path d="M12 21s-6.5-5.4-6.5-10a6.5 6.5 0 1 1 13 0c0 4.6-6.5 10-6.5 10z"/><circle cx="12" cy="11" r="2.3"/></svg>Landmark for the pro: 2nd cross, blue gate opposite the bakery.</p>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-startotp">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-sect" style="padding-top:22px;text-align:center;">
+      <div class="s-success"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <h1 class="s-h1" style="margin-top:16px;font-size:23px;">Rajesh has arrived</h1>
+      <p class="s-sub" style="margin:0 auto;max-width:32ch;">Share this code with the pro to start the job. The hourly meter begins the moment it's entered.</p>
+      <div class="s-codebox" style="margin-top:20px;">
+        <div class="cd">4 8 2 1</div>
+        <p style="font-size:11.5px;color:var(--s-muted);margin-top:8px;">Valid for 10 minutes · never share it outside the app</p>
+      </div>
+      <div class="s-card" style="margin-top:14px;">
+        <div class="s-crow"><span class="s-avat">RK</span><span class="grow" style="text-align:left;"><span class="s-pnm">Rajesh Kumar</span><span class="s-pds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>4.9 · arrived 9:41 AM</span></span><span class="right"><span class="s-chip">At your door</span></span></div>
+      </div>
+      <p class="s-note" style="justify-content:center;margin-top:12px;"><svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6z"/></svg>Free cancellation until the code is entered.</p>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-progress">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-sect" style="padding-top:14px;">
+      <span class="s-caps">Work in progress</span>
+      <div class="s-card" style="text-align:center;padding:18px 14px;">
+        <div class="s-timer">01:24:12</div>
+        <p style="font-size:12px;color:var(--s-muted);margin-top:6px;">Started 4:02 PM · ₹249/hr · billed for actual hours</p>
+        <div style="margin-top:10px;display:flex;justify-content:center;"><span class="s-chip">Meter so far · ₹349</span></div>
+      </div>
+      <div class="s-grid2" style="margin-top:12px;">
+        <div class="s-tile" style="text-align:center;padding:14px 10px;"><span class="s-mini-ic" style="margin:0 auto 8px;"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span class="s-nm" style="font-size:13.5px;">Add note or photo</span></div>
+        <div class="s-tile" style="text-align:center;padding:14px 10px;"><span class="s-mini-ic" style="margin:0 auto 8px;"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="s-nm" style="font-size:13.5px;">Extend +30 min</span></div>
+      </div>
+      <div class="s-card" style="margin-top:12px;">
+        <div class="s-line" style="padding-top:0;">Rate<span class="s-mono">₹249/hr</span></div>
+        <div class="s-line">Elapsed<span class="s-mono">1 hr 24 min</span></div>
+        <div class="s-line">Billed so far<b class="s-mono">₹349</b></div>
+      </div>
+      <div class="s-grid2" style="margin-top:12px;">
+        <div class="s-btn ghost" style="min-height:44px;font-size:13.5px;gap:7px;"><svg viewBox="0 0 24 24" style="width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.96.3 1.9.6 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.85.5 2.8.6a2 2 0 0 1 1.8 2.1z"/></svg>Call Rajesh</div>
+        <div class="s-btn ghost" style="min-height:44px;font-size:13.5px;gap:7px;"><svg viewBox="0 0 24 24" style="width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;"><path d="M20 4H4v12h5l3 4 3-4h5z"/></svg>Chat</div>
+      </div>
+      <div style="text-align:center;padding:14px 0 0;"><span class="s-change">Raise an issue</span></div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-bill">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-sect" style="padding-top:12px;text-align:center;">
+      <div class="s-success"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <h1 class="s-h1" style="margin-top:14px;font-size:23px;">Job done. Here's the bill.</h1>
+      <p class="s-sub" style="margin:0 auto;max-width:34ch;">Billed only for time worked. The receipt lands in Bookings.</p>
+    </div>
+    <div class="s-sect">
+      <div class="s-card">
+        <div class="s-line" style="padding-top:0;">Hours worked · 1 hr 48 min<span class="s-mono">1.75 hr</span></div>
+        <div class="s-line">Rate<span class="s-mono">₹249/hr</span></div>
+        <div class="s-line">Labour<b class="s-mono">₹436</b></div>
+        <div class="s-line">Visit fee<span class="s-mono">₹49</span></div>
+        <div class="s-line" style="color:var(--s-accent-deep);">Coupon FIRST50<span class="s-mono" style="color:var(--s-accent-deep);">-₹50</span></div>
+        <div class="s-tot"><span class="k">Total</span><span class="v s-mono">₹435</span></div>
+        <p class="s-note" style="margin-top:8px;"><svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6z"/></svg>Estimated ₹497 · final ₹435, because you pay for time worked.</p>
+      </div>
+      <span class="s-caps">Add a tip for Rajesh</span>
+      <div class="s-chiprow" style="margin-bottom:14px;"><span class="s-ch">No tip</span><span class="s-ch on">₹50</span><span class="s-ch">₹100</span></div>
+      <div class="s-tot" style="border-top:1px solid var(--s-border);"><span class="k">Pay now</span><span class="v s-mono">₹485</span></div>
+      <div class="s-btn" style="margin-top:12px;">Pay ₹485</div>
+      <p class="s-note" style="justify-content:center;margin-top:10px;"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/></svg>UPI · Google Pay · collect after service</p>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-rate">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-sect" style="padding-top:18px;text-align:center;">
+      <h1 class="s-h1" style="font-size:23px;">How was Rajesh?</h1>
+      <p class="s-sub" style="margin:0 auto;max-width:32ch;">Your review keeps the next home safe and the pros honest.</p>
+      <div class="s-stars" style="justify-content:center;margin-top:18px;">
+        <svg viewBox="0 0 24 24" class="f" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>
+        <svg viewBox="0 0 24 24" class="f" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>
+        <svg viewBox="0 0 24 24" class="f" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>
+        <svg viewBox="0 0 24 24" class="f" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>
+      </div>
+      <p class="s-mono" style="font-size:12px;color:var(--s-accent-deep);margin-top:8px;">4 of 5 · good</p>
+    </div>
+    <div class="s-sect">
+      <span class="s-caps">What stood out</span>
+      <div class="s-chiprow" style="margin-bottom:14px;"><span class="s-ch on">Punctual</span><span class="s-ch on">Neat work</span><span class="s-ch">Polite</span><span class="s-ch">Explained clearly</span></div>
+      <div class="s-card" style="min-height:96px;">
+        <p style="font-size:13.5px;color:var(--s-ink);line-height:1.6;">"Fixed the switchboard quickly and explained the load issue. Left the place clean."</p>
+      </div>
+      <div class="s-btn" style="margin-top:12px;">Submit review</div>
+      <p class="s-note" style="justify-content:center;margin-top:10px;"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>Shows publicly with your first name only.</p>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-bookings">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-sect" style="padding-top:8px;">
+      <h1 class="s-h1" style="font-size:24px;">Your bookings</h1>
+      <div class="s-seg" style="margin:12px 0 14px;"><span>Ongoing</span><span class="on">Completed</span></div>
+      <div class="s-card">
+        <div class="s-crow"><span class="s-mini-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></span><span class="grow"><span class="s-nm" style="font-size:14px;">Switchboard repair</span><span class="s-ds">Rajesh Kumar · 4 Oct, 4:00 PM</span></span><span class="right"><span class="s-chip">Completed</span></span></div>
+        <div class="s-hr"></div>
+        <div class="s-crow" style="justify-content:space-between;"><span class="s-mono" style="font-size:13.5px;color:var(--s-ink);font-weight:600;">₹485</span><span class="s-btn ghost" style="min-height:34px;width:auto;padding:0 14px;font-size:12.5px;border-radius:9px;">Rebook</span></div>
+      </div>
+      <div class="s-card">
+        <div class="s-crow"><span class="s-mini-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h9a3 3 0 1 0-3-3"/><path d="M3 12h13a3 3 0 1 1-3 3"/><path d="M3 16h6"/></svg></span><span class="grow"><span class="s-nm" style="font-size:14px;">Fan install &amp; repair</span><span class="s-ds">Imran Shaikh · 28 Sep, 11:00 AM</span></span><span class="right"><span class="s-chip">Completed</span></span></div>
+        <div class="s-hr"></div>
+        <div class="s-crow" style="justify-content:space-between;"><span class="s-mono" style="font-size:13.5px;color:var(--s-ink);font-weight:600;">₹335</span><span class="s-btn ghost" style="min-height:34px;width:auto;padding:0 14px;font-size:12.5px;border-radius:9px;">Rebook</span></div>
+      </div>
+      <div class="s-card">
+        <div class="s-crow"><span class="s-mini-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span><span class="grow"><span class="s-nm" style="font-size:14px;">Wiring inspection</span><span class="s-ds">21 Sep · cancelled by you</span></span><span class="right"><span class="s-chip" style="background:transparent;border:1px solid var(--s-border);color:var(--s-muted);">Cancelled</span></span></div>
+        <div class="s-hr"></div>
+        <div class="s-crow" style="justify-content:space-between;"><span style="font-size:12.5px;color:var(--s-muted);">No charge · ₹49 refunded</span><span class="s-btn ghost" style="min-height:34px;width:auto;padding:0 14px;font-size:12.5px;border-radius:9px;">Rebook</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="s-tabbar">
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/></svg>Home</span>
+    <span class="s-tab on"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Bookings</span>
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/><circle cx="17" cy="14.5" r="1.2"/></svg>Wallet</span>
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.1 3.6-7 8-7s8 2.9 8 7"/></svg>Profile</span>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-bookingdetail">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-bk-hd"><span class="s-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span><p class="s-bk-h1">Booking #FX10482</p></div>
+    <div class="s-sect" style="padding-top:0;">
+      <div class="s-crow" style="margin-bottom:12px;"><span class="s-chip">Completed</span><span style="flex:1"></span><span class="s-mono" style="font-size:12px;color:var(--s-muted);">4 Oct 2026 · 4:00 PM</span></div>
+      <div class="s-card">
+        <div class="s-crow"><span class="s-avat">RK</span><span class="grow"><span class="s-pnm">Rajesh Kumar</span><span class="s-pds"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg>4.9 · Electrician</span></span><span class="right"><span class="s-chip">Paid</span></span></div>
+      </div>
+      <span class="s-caps">Timeline</span>
+      <div class="s-card">
+        <div class="s-tl">
+          <div class="r"><span class="left"><span class="d2"></span><span class="ln"></span></span><span class="body2"><b>Booked</b><span>4:00 PM · matched in 8 min</span></span></div>
+          <div class="r"><span class="left"><span class="d2"></span><span class="ln"></span></span><span class="body2"><b>Started</b><span>4:12 PM · code 4821 verified</span></span></div>
+          <div class="r"><span class="left"><span class="d2"></span></span><span class="body2" style="padding-bottom:0;"><b>Completed</b><span>6:00 PM · 1 hr 48 min worked</span></span></div>
+        </div>
+      </div>
+      <span class="s-caps">Receipt</span>
+      <div class="s-card">
+        <div class="s-line" style="padding-top:0;">Labour · 1.75 hr<span class="s-mono">₹436</span></div>
+        <div class="s-line">Visit fee<span class="s-mono">₹49</span></div>
+        <div class="s-line">Coupon FIRST50<span class="s-mono">-₹50</span></div>
+        <div class="s-line">Tip for Rajesh<span class="s-mono">₹50</span></div>
+        <div class="s-tot"><span class="k">Total paid</span><span class="v s-mono">₹485</span></div>
+        <div class="s-line" style="padding-top:10px;">Paid via<b>UPI · Google Pay</b></div>
+      </div>
+      <div class="s-grid2">
+        <div class="s-btn ghost" style="min-height:44px;font-size:13.5px;">Download</div>
+        <div class="s-btn" style="min-height:44px;font-size:13.5px;">Rebook</div>
+      </div>
+      <div style="text-align:center;padding:12px 0 0;"><span class="s-change">Chat with Rajesh</span></div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-chat">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont" style="display:flex;flex-direction:column;padding:0;">
+    <div class="s-bk-hd"><span class="s-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span><span class="s-avat" style="width:34px;height:34px;font-size:11px;">RK</span><span style="flex:1;"><span class="s-pnm" style="display:block;">Rajesh Kumar</span><span class="s-pds">Usually replies in ~2 min</span></span><span class="s-icb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.96.3 1.9.6 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.85.5 2.8.6a2 2 0 0 1 1.8 2.1z"/></svg></span></div>
+    <div class="s-chat">
+      <div class="s-msg in">I'm 2 km away, will reach in about 8 minutes.<span class="tm">4:04 PM</span></div>
+      <div class="s-msg out">Great. Gate code is 4310 if I don't hear the bell.<span class="tm">4:05 PM</span></div>
+      <div class="s-msg in">Noted. Bringing a spare socket and tester, just in case.<span class="tm">4:05 PM</span></div>
+    </div>
+    <div class="s-chatbar">
+      <span class="f">Message Rajesh…</span>
+      <span class="snd"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg></span>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-wallet">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-sect" style="padding-top:8px;">
+      <h1 class="s-h1" style="font-size:24px;">Wallet</h1>
+      <div class="s-card s-fill" style="margin-top:12px;padding:18px;">
+        <p style="font-size:12px;opacity:0.82;">Balance</p>
+        <div class="s-mono" style="font-size:30px;font-weight:600;margin-top:4px;color:#fff;">₹164</div>
+        <div style="margin-top:14px;"><span style="display:inline-flex;background:#fff;color:var(--s-accent-deep);border-radius:10px;padding:9px 16px;font-size:13px;font-weight:600;">Add money</span></div>
+      </div>
+      <span class="s-caps" style="margin-top:18px;">Coupons</span>
+      <div class="s-coupon"><span class="amt">50%</span><span class="ct"><b>FIRST50</b><span>Up to ₹50 off your first booking</span></span><span class="s-chip">Applied</span></div>
+      <div class="s-coupon"><span class="amt">₹100</span><span class="ct"><b>PLUS100</b><span>₹100 off with Plus membership</span></span></div>
+      <span class="s-caps" style="margin-top:8px;">Recent activity</span>
+      <div class="s-card">
+        <div class="s-line" style="padding-top:0;">Switchboard repair · 4 Oct<span class="s-mono" style="color:var(--s-ink);">-₹485</span></div>
+        <div class="s-line">Refund · cancelled visit<span class="s-mono" style="color:var(--s-accent-deep);">+₹49</span></div>
+        <div class="s-line">Referral bonus · Amit joined<span class="s-mono" style="color:var(--s-accent-deep);">+₹100</span></div>
+        <div class="s-line">Added to wallet<span class="s-mono" style="color:var(--s-ink);">+₹500</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="s-tabbar">
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/></svg>Home</span>
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Bookings</span>
+    <span class="s-tab on"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/><circle cx="17" cy="14.5" r="1.2"/></svg>Wallet</span>
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.1 3.6-7 8-7s8 2.9 8 7"/></svg>Profile</span>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-membership">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-bk-hd"><span class="s-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span><p class="s-bk-h1">FixIn10 Plus</p></div>
+    <div class="s-sect" style="padding-top:0;">
+      <div class="s-card s-fill" style="padding:18px;">
+        <span class="s-chip" style="background:rgba(255,255,255,0.18);color:#fff;">PLUS</span>
+        <p style="font-size:15px;font-weight:600;margin-top:10px;">Zero visit fees. Priority matching.</p>
+        <p style="font-size:12.5px;opacity:0.82;margin-top:5px;line-height:1.55;">Members get 5% back on every job, two free cancellations a month, and faster pro pick.</p>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px;">
+        <div class="s-plan"><div class="nm">Monthly</div><div class="pr">₹99<small>/mo</small></div></div>
+        <div class="s-plan on"><div class="nm">Yearly</div><div class="pr">₹799<small>/yr</small></div><span class="tag2">Save 33%</span></div>
+      </div>
+      <span class="s-caps" style="margin-top:18px;">What you get</span>
+      <div class="s-incl"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>₹0 visit fee on every booking</div>
+      <div class="s-incl"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>Priority matching, ahead of the queue</div>
+      <div class="s-incl"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>5% back in wallet on every job</div>
+      <div class="s-incl"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>Two free cancellations a month</div>
+      <div class="s-btn" style="margin-top:14px;">Join Plus · ₹799/yr</div>
+      <p class="s-note" style="justify-content:center;margin-top:10px;"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>Renews yearly. Cancel anytime from Profile.</p>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-referral">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-bk-hd"><span class="s-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span><p class="s-bk-h1">Invite friends</p></div>
+    <div class="s-sect" style="padding-top:0;">
+      <div class="s-card s-fill" style="padding:18px;text-align:center;">
+        <p style="font-size:17px;font-weight:600;">₹100 for you, ₹100 for them</p>
+        <p style="font-size:12.5px;opacity:0.85;margin-top:6px;">Credited when your friend completes their first booking.</p>
+      </div>
+      <div class="s-codebox" style="margin-top:14px;">
+        <p style="font-size:11.5px;color:var(--s-muted);">Your code</p>
+        <div class="cd">ANAN50</div>
+        <div class="s-btn tint" style="min-height:40px;margin-top:10px;font-size:13.5px;">Copy code</div>
+      </div>
+      <span class="s-caps" style="margin-top:18px;">How it works</span>
+      <div class="s-nav nt"><span class="ic s-mono" style="font-size:13px;font-weight:600;">1</span><span class="t">Share your code</span></div>
+      <div class="s-nav"><span class="ic s-mono" style="font-size:13px;font-weight:600;">2</span><span class="t">They book their first fix</span></div>
+      <div class="s-nav"><span class="ic s-mono" style="font-size:13px;font-weight:600;">3</span><span class="t">You both get ₹100 in wallet</span></div>
+      <span class="s-caps" style="margin-top:12px;">Your rewards</span>
+      <div class="s-card">
+        <div class="s-line" style="padding-top:0;">Amit joined · 2 Oct<b class="s-mono" style="color:var(--s-accent-deep);">+₹100</b></div>
+        <div class="s-line">Priya invited · first booking pending<span class="s-chip" style="background:transparent;border:1px solid var(--s-border);color:var(--s-muted);">Pending</span></div>
+      </div>
+      <div class="s-btn" style="margin-top:12px;">Share invite link</div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-profile">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-sect" style="padding-top:10px;">
+      <div class="s-crow" style="gap:14px;">
+        <span class="s-avat" style="width:56px;height:56px;font-size:16px;">AK</span>
+        <span class="grow"><span class="s-nm" style="font-size:18px;">Ananya Kapoor</span><span class="s-ds">+91 98765 43210 · Indiranagar</span><span class="s-chip" style="margin-top:6px;display:inline-flex;">Plus member · ₹0 visit fee</span></span>
+      </div>
+      <div class="s-grid3" style="margin-top:16px;">
+        <div class="s-tile" style="text-align:center;padding:12px 8px;"><div class="s-mono" style="font-size:15px;font-weight:600;color:var(--s-ink);">₹164</div><div style="font-size:10.5px;color:var(--s-muted);margin-top:3px;">Wallet</div></div>
+        <div class="s-tile" style="text-align:center;padding:12px 8px;"><div style="font-size:15px;font-weight:600;color:var(--s-ink);">Plus</div><div style="font-size:10.5px;color:var(--s-muted);margin-top:3px;">Active</div></div>
+        <div class="s-tile" style="text-align:center;padding:12px 8px;"><div class="s-mono" style="font-size:15px;font-weight:600;color:var(--s-ink);">₹100</div><div style="font-size:10.5px;color:var(--s-muted);margin-top:3px;">Per invite</div></div>
+      </div>
+      <div style="margin-top:14px;">
+        <div class="s-nav nt"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.4-6.5-10a6.5 6.5 0 1 1 13 0c0 4.6-6.5 10-6.5 10z"/><circle cx="12" cy="11" r="2.3"/></svg></span><span class="t">Addresses</span><span class="v">Home, office</span><span class="ch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></span></div>
+        <div class="s-nav"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/></svg></span><span class="t">Payment methods</span><span class="v">UPI · GPay</span><span class="ch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></span></div>
+        <div class="s-nav"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18"/></svg></span><span class="t">Language</span><span class="v">English · हिंदी</span><span class="ch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></span></div>
+        <div class="s-nav"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.1 8.3 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 8.9 8.3"/></svg></span><span class="t">Membership</span><span class="v">Plus active</span><span class="ch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></span></div>
+        <div class="s-nav"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span class="t">Invite friends</span><span class="v">Earn ₹100</span><span class="ch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></span></div>
+        <div class="s-nav"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 2-2.6 3.5M12 17h.01"/></svg></span><span class="t">Help &amp; support</span><span class="ch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></span></div>
+        <div class="s-nav"><span class="ic" style="background:transparent;border:1px solid var(--s-border);color:var(--s-muted);"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg></span><span class="t" style="color:var(--s-muted);">Log out</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="s-tabbar">
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/></svg>Home</span>
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Bookings</span>
+    <span class="s-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/><circle cx="17" cy="14.5" r="1.2"/></svg>Wallet</span>
+    <span class="s-tab on"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.1 3.6-7 8-7s8 2.9 8 7"/></svg>Profile</span>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-settings">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-bk-hd"><span class="s-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span><p class="s-bk-h1">Settings</p></div>
+    <div class="s-sect" style="padding-top:0;">
+      <span class="s-caps">Notifications</span>
+      <div class="s-card" style="padding:4px 14px;">
+        <div class="s-payrow"><span class="t"><b>Push notifications</b><span>Booking updates and arrivals</span></span><span class="s-sw on"></span></div>
+        <div class="s-payrow"><span class="t"><b>SMS updates</b><span>Codes and receipts</span></span><span class="s-sw on"></span></div>
+        <div class="s-payrow"><span class="t"><b>Offers and promos</b><span>Deals near your area</span></span><span class="s-sw"></span></div>
+      </div>
+      <span class="s-caps" style="margin-top:16px;">Language</span>
+      <div class="s-seg"><span class="on">English</span><span>हिंदी</span></div>
+      <span class="s-caps" style="margin-top:16px;">More</span>
+      <div class="s-card" style="padding:4px 14px;">
+        <div class="s-payrow"><span class="t"><b>Privacy policy</b></span><span style="color:var(--s-muted);display:grid;place-items:center;"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;"><path d="M9 5l7 7-7 7"/></svg></span></div>
+        <div class="s-payrow"><span class="t"><b>Terms of service</b></span><span style="color:var(--s-muted);display:grid;place-items:center;"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;"><path d="M9 5l7 7-7 7"/></svg></span></div>
+        <div class="s-payrow"><span class="t"><b>Delete account</b><span>Removes your history permanently</span></span><span style="color:var(--s-muted);display:grid;place-items:center;"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;"><path d="M9 5l7 7-7 7"/></svg></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<template id="tpl-support">
+  <div class="s-status"><span class="s-mono">9:41</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      <svg viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="0.6"/><rect x="4" y="5" width="3" height="6" rx="0.6"/><rect x="8" y="3" width="3" height="8" rx="0.6"/><rect x="12" y="0" width="3" height="11" rx="0.6"/></svg>
+      <svg viewBox="0 0 17 11" aria-hidden="true"><path d="M8.5 1.5C5.5 1.5 2.7 2.6 0.5 4.6L2 6.1C3.8 4.5 6.1 3.6 8.5 3.6c2.4 0 4.7 0.9 6.5 2.5l1.5-1.5c-2.2-2-5-3.1-8-3.1zM3.5 7.6L5 9.1c1-0.9 2.2-1.4 3.5-1.4 1.3 0 2.5 0.5 3.5 1.4l1.5-1.5c-1.4-1.3-3.1-2-5-2-1.9 0-3.6 0.7-5 2zM6.5 10.6l2 2 2-2c-0.5-0.5-1.2-0.8-2-0.8s-1.5 0.3-2 0.8z"/></svg>
+      <svg class="bat" viewBox="0 0 25 11" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.4" fill="currentColor" fill-opacity="0.45"/><rect x="2" y="2" width="18" height="7" rx="1.4"/></svg>
+    </span>
+  </div>
+  <div class="s-cont">
+    <div class="s-bk-hd"><span class="s-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></span><p class="s-bk-h1">Help &amp; support</p></div>
+    <div class="s-sect" style="padding-top:0;">
+      <p class="s-sub" style="max-width:none;">Hi Ananya. Tell us what's up, or start from a common topic.</p>
+      <div class="s-grid2" style="margin-top:14px;">
+        <div class="s-tile" style="display:flex;flex-direction:column;gap:8px;"><span class="s-mini-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="s-nm" style="font-size:13px;">My pro is late</span></div>
+        <div class="s-tile" style="display:flex;flex-direction:column;gap:8px;"><span class="s-mini-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v10H7l-4 3z"/></svg></span><span class="s-nm" style="font-size:13px;">Refund issue</span></div>
+        <div class="s-tile" style="display:flex;flex-direction:column;gap:8px;"><span class="s-mini-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/></svg></span><span class="s-nm" style="font-size:13px;">Billing question</span></div>
+        <div class="s-tile" style="display:flex;flex-direction:column;gap:8px;"><span class="s-mini-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 2-2.6 3.5M12 17h.01"/></svg></span><span class="s-nm" style="font-size:13px;">Something else</span></div>
+      </div>
+      <span class="s-caps" style="margin-top:16px;">Reach us</span>
+      <div class="s-nav nt" style="border-top:1px solid var(--s-border);"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4H4v12h5l3 4 3-4h5z"/></svg></span><span class="t">Chat with support</span><span class="v">24×7</span><span class="ch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></span></div>
+      <div class="s-nav"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.96.3 1.9.6 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.85.5 2.8.6a2 2 0 0 1 1.8 2.1z"/></svg></span><span class="t">Call support</span><span class="v">Toll-free</span><span class="ch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></span></div>
+      <div class="s-nav"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6z"/></svg></span><span class="t">Emergency SOS</span><span class="ch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></span></div>
+      <span class="s-caps" style="margin-top:14px;">Recent ticket</span>
+      <div class="s-card">
+        <div class="s-crow"><span class="grow"><span class="s-nm" style="font-size:13.5px;">Refund for cancelled visit</span><span class="s-ds">#TK-2210 · 2 Oct · resolved in 3 hrs</span></span><span class="right"><span class="s-chip">Resolved</span></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="s-ind"></div>
+</template>
+
+<script>
+(() => {
+  const UI_STRINGS = {
+    docTitle: 'FixIn10 - Infinite Canvas',
+    zoom: { zoomIn: 'Zoom in', zoomOut: 'Zoom out', reset: 'Reset view' },
+    kbdHints: [['Scroll', 'pan'], ['Ctrl+Scroll', 'zoom'], ['Ctrl+Z', 'undo']],
+    sections: { context: '01 PROJECT CONTEXT', designSystem: '02 DESIGN SYSTEM', deliverables: '03 DESIGN DELIVERABLES' },
+  };
+
+  document.title = UI_STRINGS.docTitle;
+  document.getElementById('zoomIn').setAttribute('aria-label', UI_STRINGS.zoom.zoomIn);
+  document.getElementById('zoomOut').setAttribute('aria-label', UI_STRINGS.zoom.zoomOut);
+  document.getElementById('zoomReset').setAttribute('aria-label', UI_STRINGS.zoom.reset);
+  document.getElementById('kbdHint').innerHTML = UI_STRINGS.kbdHints.map(([keys, action]) => `<span><kbd>${keys}</kbd> ${action}</span>`).join('');
+
+  const viewport = document.getElementById('viewport');
+  const world = document.getElementById('world');
+  const zoomLabel = document.getElementById('zoomLabel');
+  const coordIndicator = document.getElementById('coordIndicator');
+
+  let panX = 0, panY = 0, zoom = 1;
+  const MIN_ZOOM = 0.05, MAX_ZOOM = 8;
+
+  function updateTransform() {
+    world.style.transform = `translate(${panX}px,${panY}px) scale(${zoom})`;
+    zoomLabel.textContent = Math.round(zoom * 100) + '%';
+    updateGrid();
+  }
+  function updateGrid() {
+    const g = 40 * zoom;
+    viewport.style.backgroundImage = `radial-gradient(circle, var(--grid-color) 0.8px, transparent 0.8px)`;
+    viewport.style.backgroundSize = `${g}px ${g}px`;
+    viewport.style.backgroundPosition = `${panX % g}px ${panY % g}px`;
+  }
+
+  let isPanning = false, panSX, panSY;
+  viewport.addEventListener('pointerdown', (e) => {
+    if (e.target === viewport || e.target === world) {
+      isPanning = true; panSX = e.clientX - panX; panSY = e.clientY - panY;
+      viewport.classList.add('panning'); viewport.setPointerCapture(e.pointerId); e.preventDefault();
+    }
+  });
+  viewport.addEventListener('pointermove', (e) => { if (isPanning) { panX = e.clientX - panSX; panY = e.clientY - panSY; updateTransform(); } });
+  viewport.addEventListener('pointerup', () => { isPanning = false; viewport.classList.remove('panning'); });
+
+  viewport.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = viewport.getBoundingClientRect();
+    if (e.ctrlKey || e.metaKey) {
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const wx = (mx - panX) / zoom, wy = (my - panY) / zoom;
+      zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * (e.deltaY > 0 ? 0.95 : 1.05)));
+      panX = mx - wx * zoom; panY = my - wy * zoom;
+    } else {
+      const hasX = Math.abs(e.deltaX) > 0.5;
+      if (hasX || Math.abs(e.deltaX) > Math.abs(e.deltaY) * 0.3) { panX -= e.deltaX; panY -= e.deltaY; }
+      else {
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        const wx = (mx - panX) / zoom, wy = (my - panY) / zoom;
+        zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * (e.deltaY > 0 ? 0.95 : 1.05)));
+        panX = mx - wx * zoom; panY = my - wy * zoom;
+      }
+    }
+    updateTransform();
+  }, { passive: false });
+
+  function zoomAt(factor) {
+    const r = viewport.getBoundingClientRect();
+    const cx = r.width / 2, cy = r.height / 2;
+    const wx = (cx - panX) / zoom, wy = (cy - panY) / zoom;
+    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor));
+    panX = cx - wx * zoom; panY = cy - wy * zoom; updateTransform();
+  }
+  document.getElementById('zoomIn').onclick = () => zoomAt(1.25);
+  document.getElementById('zoomOut').onclick = () => zoomAt(0.8);
+  document.getElementById('zoomReset').onclick = () => { zoom = 1; panX = 0; panY = 0; updateTransform(); };
+  document.getElementById('zoomReset').title = UI_STRINGS.zoom.reset;
+
+  viewport.addEventListener('pointermove', (e) => {
+    if (isPanning) return;
+    const r = viewport.getBoundingClientRect();
+    coordIndicator.textContent = `${Math.round((e.clientX - r.left - panX) / zoom)}, ${Math.round((e.clientY - r.top - panY) / zoom)}`;
+  });
+
+  const undoStack = [];
+  function saveUndo() {
+    const s = [];
+    world.querySelectorAll('.canvas-el').forEach(el => s.push({ id: el.id, left: el.style.left, top: el.style.top }));
+    undoStack.push({ panX, panY, zoom, assets: s });
+    if (undoStack.length > 60) undoStack.shift();
+  }
+  function undo() {
+    if (!undoStack.length) return;
+    const st = undoStack.pop();
+    panX = st.panX; panY = st.panY; zoom = st.zoom;
+    st.assets.forEach(a => { const el = document.getElementById(a.id); if (el) { el.style.left = a.left; el.style.top = a.top; } });
+    updateTransform();
+  }
+  document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); } });
+
+  function makeDraggable(el) {
+    let dragging = false, sx, sy, ox, oy;
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      dragging = true; el.classList.add('dragging'); saveUndo();
+      sx = e.clientX; sy = e.clientY; ox = parseFloat(el.style.left); oy = parseFloat(el.style.top);
+      el.setPointerCapture(e.pointerId); e.stopPropagation();
+    });
+    el.addEventListener('pointermove', (e) => { if (dragging) { el.style.left = (ox + (e.clientX - sx) / zoom) + 'px'; el.style.top = (oy + (e.clientY - sy) / zoom) + 'px'; } });
+    el.addEventListener('pointerup', () => { if (dragging) { dragging = false; el.classList.remove('dragging'); } });
+  }
+
+  let _id = 0;
+  function uid(p) { return (p || 'el') + '-' + (++_id); }
+
+  function addSection(rowY, label) {
+    const parts = label.split(' ');
+    const el = document.createElement('div');
+    el.className = 'section-header';
+    el.style.left = '60px'; el.style.top = rowY + 'px';
+    el.innerHTML = `<span class="section-line"></span><span class="section-num">${parts[0] || ''}</span><span class="section-label">${parts.slice(1).join(' ')}</span>`;
+    world.appendChild(el);
+    return rowY;
+  }
+  function addTitle(x, y, text, options = {}) {
+    const el = document.createElement('div');
+    el.className = 'canvas-title'; el.id = uid('title');
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    el.style.fontSize = (options.fontSize || 48) + 'px';
+    if (options.fontWeight) el.style.fontWeight = options.fontWeight;
+    if (options.color) el.style.color = options.color;
+    if (options.maxWidth) el.style.maxWidth = options.maxWidth + 'px';
+    el.textContent = text;
+    world.appendChild(el);
+    return el;
+  }
+  function addText(x, y, text, options = {}) {
+    const el = document.createElement('div');
+    el.className = 'canvas-text canvas-el'; el.id = uid('text');
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    el.style.fontSize = (options.fontSize || 14) + 'px';
+    if (options.color) el.style.color = options.color;
+    if (options.maxWidth) el.style.maxWidth = options.maxWidth + 'px';
+    el.textContent = text;
+    world.appendChild(el); makeDraggable(el);
+    return el;
+  }
+  function addTag(x, y, label, options = {}) {
+    const el = document.createElement('div');
+    el.className = 'canvas-el'; el.id = uid('tag');
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    el.innerHTML = `<div class="canvas-tag"><span class="tag-dot" style="background:${options.color || 'var(--accent)'}"></span>${label}</div>`;
+    world.appendChild(el); makeDraggable(el);
+    return el;
+  }
+  function addContextCard(x, y, w, h, title, content) {
+    const el = document.createElement('div');
+    el.className = 'canvas-el'; el.id = uid('ctx');
+    el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.width = w + 'px';
+    if (h) el.style.height = h + 'px';
+    el.innerHTML = `<div class="context-card" style="width:100%;${h ? 'height:100%' : ''}"><div class="card-head"><div class="head-indicator"></div><h3>${title}</h3></div><div class="card-content">${content}</div></div>`;
+    world.appendChild(el); makeDraggable(el);
+    return el;
+  }
+  function addDesignSystemCard(x, y, w, h, type, data) {
+    const el = document.createElement('div');
+    el.className = 'canvas-el'; el.id = uid('ds');
+    el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.width = w + 'px';
+    if (h) el.style.height = h + 'px';
+    let body = '';
+    if (typeof data.html === 'string') body = data.html;
+    el.innerHTML = `<div class="ds-card" style="width:100%;${h ? 'height:100%' : ''}"><div class="ds-head">${data.title || type}</div><div class="ds-body">${body}</div></div>`;
+    world.appendChild(el); makeDraggable(el);
+    return el;
+  }
+  function addPage(x, y, w, h, label, htmlContent) {
+    const el = document.createElement('div');
+    el.className = 'canvas-el'; el.id = uid('page');
+    el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.width = w + 'px'; el.style.height = (h + 40) + 'px';
+    el.innerHTML = `<div class="design-page" style="width:${w}px;height:${h}px;"><div class="page-content">${htmlContent}</div></div><div class="page-label">${label}</div>`;
+    world.appendChild(el); makeDraggable(el);
+    return el;
+  }
+  function addNote(x, y, tag, text) {
+    const el = document.createElement('div');
+    el.className = 'canvas-el'; el.id = uid('note');
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    el.innerHTML = `<div class="canvas-note"><div class="note-tag">${tag}</div><div class="note-body">${text}</div></div>`;
+    world.appendChild(el); makeDraggable(el);
+    return el;
+  }
+  function addDiagram(x, y, w, h, htmlContent) {
+    const el = document.createElement('div');
+    el.className = 'canvas-el'; el.id = uid('diagram');
+    el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.width = w + 'px'; el.style.height = h + 'px';
+    el.innerHTML = `<div class="canvas-diagram" style="width:100%;height:100%;"><div class="diagram-content">${htmlContent}</div></div>`;
+    world.appendChild(el); makeDraggable(el);
+    return el;
+  }
+  function below(el, gap) { if (gap === undefined) gap = 20; return parseFloat(el.style.top) + el.offsetHeight + gap; }
+  function rightOf(el, gap) { if (gap === undefined) gap = 20; return parseFloat(el.style.left) + el.offsetWidth + gap; }
+  function maxY(els, gap) { if (gap === undefined) gap = 20; return Math.max(...els.map(e => parseFloat(e.style.top) + e.offsetHeight)) + gap; }
+
+  function tpl(id) {
+    const el = document.getElementById(id);
+    if (!el) return '<div class="s-status"></div><div class="s-cont"><div class="s-auth" style="padding-top:40px;"><h1 class="s-h1">Missing ' + id + '</h1></div></div><div class="s-ind"></div>';
+    return el.innerHTML;
+  }
+  function page(id) { return '<div class="scr scr-a">' + tpl(id) + '</div>'; }
+
+  function typeRow(fontCss, size, weight, text, ink, label) {
+    return '<div style="display:flex;align-items:baseline;gap:10px;">' +
+      '<span style="font-family:var(--font-mono);font-size:9px;color:var(--text-tertiary);width:46px;flex:none;text-transform:uppercase;letter-spacing:0.06em;">' + label + '</span>' +
+      '<span style="font-family:' + fontCss + ';font-size:' + size + 'px;font-weight:' + weight + ';color:' + ink + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + text + '</span></div>';
+  }
+  function swatches(items) {
+    return '<div class="color-swatch-group" style="gap:12px;flex-wrap:wrap;">' + items.map(s =>
+      '<div class="swatch-item"><div class="swatch-circle" style="width:44px;height:44px;background:' + s.hex + ';"></div>' +
+      '<div class="swatch-name">' + s.n + '</div><div class="swatch-hex">' + s.hex + '</div></div>').join('') + '</div>';
+  }
+
+  function initScene() {
+    /* ── Row 1: PROJECT CONTEXT ── */
+    addSection(40, UI_STRINGS.sections.context);
+
+    const r1Title = addTitle(100, 92, 'FixIn10', { fontSize: 54, fontWeight: 700 });
+    const r1Desc = addText(100, below(r1Title, 12),
+      'On-demand home services for Indian cities. Book a verified electrician, carpenter or plumber in minutes, tracked door to door, billed by the hour. Complete cross-platform design, ready to develop.',
+      { fontSize: 15, maxWidth: 480 });
+
+    const tagsY = below(r1Desc, 18);
+    const tag1 = addTag(100, tagsY, '3 trades: electrician, carpenter, plumber', { color: '#146B52' });
+    const tag2 = addTag(rightOf(tag1, 8), tagsY, 'Hourly pricing, ₹', { color: '#D9821F' });
+    const tag3 = addTag(rightOf(tag2, 8), tagsY, '10-minute match promise', { color: '#A6492B' });
+    const tag4 = addTag(rightOf(tag3, 8), tagsY, 'iOS + Android');
+    const tag5 = addTag(rightOf(tag4, 8), tagsY, 'English + Hindi ready');
+
+    const cardsY = below(tag1, 26);
+    const c1 = addContextCard(100, cardsY, 330, null, 'The product',
+      'Household fixes stall for weeks: no trusted pro, no clear price, no quick slot. FixIn10 matches a verified pro in about ten minutes, tracks the visit live, and bills by the hour actually worked.');
+    const c2 = addContextCard(450, cardsY, 300, null, 'Who it is for',
+      'Renters and families in metros who want repairs done without haggling. Pros get steady work, clear jobs and same-day payouts.');
+    const c3 = addContextCard(770, cardsY, 330, null, 'This round',
+      'The complete customer journey: 25 screens from splash to support, plus an interactive prototype that runs the whole cycle end to end. Customer app first; pro side comes next.');
+
+    const flowY = maxY([c1, c2, c3], 30);
+    const flow = addDiagram(100, flowY, 1240, 128,
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<span class="flow-chip">Name the problem</span><span class="flow-arr">→</span>' +
+        '<span class="flow-chip">Matched in ~10 min</span><span class="flow-arr">→</span>' +
+        '<span class="flow-chip">Track arrival live</span><span class="flow-arr">→</span>' +
+        '<span class="flow-chip">Start with code</span><span class="flow-arr">→</span>' +
+        '<span class="flow-chip">Work, billed hourly</span><span class="flow-arr">→</span>' +
+        '<span class="flow-chip">Pay & rate</span><span class="flow-arr">→</span>' +
+        '<span class="flow-chip">Bookings, wallet, Plus, referrals</span>' +
+      '</div>' +
+      '<div style="margin-top:12px;font-size:11.5px;color:var(--text-tertiary);">Customer happy path. Chat runs alongside tracking and the job; Support and Settings sit off Profile.</div>');
+
+    const notesY = below(flow, 28);
+    const n1 = addNote(100, notesY, 'Name research',
+      'FixIn10 chosen after a scan: no direct app-store collisions found, the 10-minute promise is in the name, and it keeps the "10" from the tenmin-service repo. FixKar and FixMitro are already taken in this category; the Tez family is crowded. TenMin and TezFix stay as bench alternates. Do a formal trademark and domain check before launch.');
+    const n2 = addNote(rightOf(n1, 20), notesY, 'How to read this',
+      'Row 2 is the dev-ready system: tokens, type, components, states. Row 3 is all 25 screens in five journey stages; arrows mark the tap that moves you forward. The prototype replays the same journey live.');
+    const n3 = addNote(rightOf(n2, 20), notesY, 'Figma ready',
+      'Every screen is a clean 390 × 844 frame with no canvas effects inside. Screenshot straight into Figma; all text is real text.');
+
+    /* ── Row 2: DESIGN SYSTEM ── */
+    const r2Start = maxY([c1, c2, c3, flow, n1, n2, n3], 84);
+    addSection(r2Start, UI_STRINGS.sections.designSystem);
+
+    const r2Head = addText(100, r2Start + 58,
+      'Direction: "Neighbour", the warm and trusted system you picked. Deep green on warm paper, serif display, flat honest surfaces. Tokens below are final and dev-ready.',
+      { fontSize: 15, maxWidth: 680 });
+
+    const dsY = below(r2Head, 26);
+
+    const colorCard = addDesignSystemCard(100, dsY, 450, null, 'custom', {
+      title: 'Colour',
+      html: swatches([
+        { n: 'Background', hex: '#F7F6F0' }, { n: 'Surface', hex: '#FFFFFF' }, { n: 'Ink', hex: '#1F1B16' },
+        { n: 'Muted', hex: '#6E675C' }, { n: 'Border', hex: '#E7E2D6' }, { n: 'Accent', hex: '#146B52' },
+        { n: 'Accent soft', hex: '#E1EFE8' }, { n: 'Accent deep', hex: '#0F5741' }
+      ]) +
+      '<div style="margin-top:16px;font-size:11px;line-height:1.9;color:var(--text-tertiary);font-family:var(--font-mono);">' +
+      '--bg #F7F6F0 · --surface #FFFFFF · --ink #1F1B16<br>--muted #6E675C · --border #E7E2D6<br>--accent #146B52 · --accent-soft #E1EFE8<br>--success #16A34A · --danger #DC2626 (runtime only)</div>'
+    });
+
+    const typeCard = addDesignSystemCard(574, dsY, 400, null, 'custom', {
+      title: 'Typography',
+      html:
+        '<div style="display:flex;flex-direction:column;gap:8px;">' +
+        typeRow("Georgia, serif", 22, 600, 'Fix anything in a hurry.', '#1F1B16', 'Display') +
+        typeRow("Georgia, serif", 17, 600, 'Review booking', '#1F1B16', 'H2') +
+        typeRow("inherit", 13.5, 400, 'Billed by the hour, paid for hours worked.', '#1F1B16', 'Body') +
+        typeRow("var(--font-mono)", 11.5, 500, '₹249/hr · 4.9 rating', '#1F1B16', 'Meta') +
+        '</div>' +
+        '<div style="margin-top:14px;font-size:11px;line-height:1.8;color:var(--text-tertiary);">Display: Iowan Old Style / Georgia (serif). Body: system sans. Numerals: mono, tabular. Devanagari: Noto Sans Devanagari fallback for Hindi. Scale: 25 / 21 / 15 / 13.5 / 12 / 10.</div>'
+    });
+
+    const compCard = addDesignSystemCard(998, dsY, 430, null, 'custom', {
+      title: 'Components & states',
+      html:
+        '<div style="display:flex;flex-direction:column;gap:10px;">' +
+        '<div style="display:flex;gap:8px;align-items:center;"><span style="min-height:40px;display:inline-flex;align-items:center;padding:0 18px;border-radius:14px;background:#146B52;color:#fff;font:600 13px -apple-system,system-ui;">Continue</span>' +
+        '<span style="min-height:40px;display:inline-flex;align-items:center;padding:0 16px;border-radius:14px;border:1px solid #E7E2D6;color:#1F1B16;font:500 13px -apple-system,system-ui;">Secondary</span>' +
+        '<span style="min-height:40px;display:inline-flex;align-items:center;padding:0 18px;border-radius:14px;background:#146B52;color:#fff;font:600 13px -apple-system,system-ui;opacity:.42;">Disabled</span></div>' +
+        '<div style="border:1.5px solid #146B52;border-radius:14px;min-height:44px;display:flex;align-items:center;padding:0 14px;font-size:13px;color:#6E675C;background:#fff;box-shadow:0 0 0 1px #146B52;">Search area, street or landmark</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;"><span style="padding:6px 12px;border-radius:999px;background:#E1EFE8;color:#0F5741;font:600 11px -apple-system;">Available now</span><span style="padding:6px 12px;border-radius:999px;border:1px solid #146B52;background:#E1EFE8;color:#0F5741;font:600 11px -apple-system;">4:00-6:00 PM</span><span style="padding:6px 12px;border-radius:999px;border:1px solid #E7E2D6;font:500 11px -apple-system;color:#6E675C;">6:00-8:00 PM</span></div>' +
+        '<div style="display:flex;gap:14px;align-items:center;">' +
+        '<span style="display:flex;gap:10px;">' +
+        '<span style="width:54px;height:60px;border-radius:12px;border:1.5px solid #146B52;display:grid;place-items:center;font-family:var(--font-mono);font-size:22px;font-weight:600;color:#1F1B16;background:#fff;">4</span>' +
+        '<span style="width:54px;height:60px;border-radius:12px;border:1.5px solid #E7E2D6;display:grid;place-items:center;font-family:var(--font-mono);font-size:22px;font-weight:600;color:#1F1B16;background:#fff;">8</span></span>' +
+        '<span style="display:flex;gap:4px;"><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:#146B52;"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:#146B52;"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:#146B52;"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:#146B52;"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg><svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:#E7E2D6;"><path d="M12 2l2.9 6.3 6.6.5-5 4.4 1.5 6.5L12 16.9 6 19.7l1.5-6.5-5-4.4 6.6-.5z"/></svg></span>' +
+        '</div>' +
+        '<div style="font-size:11px;color:var(--text-tertiary);line-height:1.8;">States: default / pressed / disabled / loading / focus. Inputs validate on blur. One accent use per action, two per screen maximum.</div>' +
+        '</div>'
+    });
+
+    const handoffCard = addDesignSystemCard(1452, dsY, 300, null, 'custom', {
+      title: 'Dev handoff',
+      html:
+        '<div style="display:flex;flex-direction:column;gap:9px;font-size:12px;line-height:1.6;color:var(--text-secondary);">' +
+        '<div>Grid 4px. Tap targets 48px minimum.</div>' +
+        '<div>Radii: card 16 / button 14 / chip pill.</div>' +
+        '<div>Motion 150-200ms, cubic-bezier(0.2, 0, 0, 1).</div>' +
+        '<div>Type: serif display, system sans, mono numerals.</div>' +
+        '<div>Flutter: seed ColorScheme from 0xFF146B52, tokens map 1:1.</div>' +
+        '<div>Reduced motion honored; no blur on low-end devices.</div>' +
+        '<div style="padding-top:8px;border-top:1px solid rgba(255,255,255,0.07);color:var(--text-tertiary);">English + Hindi strings planned; keep 30% text headroom.</div>' +
+        '</div>'
+    });
+
+    const statesCard = addDesignSystemCard(1776, dsY, 300, null, 'custom', {
+      title: 'Edge states',
+      html:
+        '<div style="background:#F7F6F0;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px;">' +
+        '<div><div style="font:600 10px var(--font-mono);color:#6E675C;letter-spacing:.06em;margin-bottom:6px;">LOADING</div><div style="height:44px;border-radius:12px;background:linear-gradient(90deg,#E7E2D6 25%,#F1EEE6 50%,#E7E2D6 75%);background-size:200% 100%;"></div><div style="height:12px;width:70%;border-radius:6px;background:#E7E2D6;margin-top:8px;"></div></div>' +
+        '<div><div style="font:600 10px var(--font-mono);color:#6E675C;letter-spacing:.06em;margin-bottom:6px;">EMPTY</div><div style="border:1.5px dashed #E7E2D6;border-radius:12px;padding:12px;text-align:center;font-size:11px;color:#6E675C;background:#fff;">No bookings yet. Book your first fix.</div></div>' +
+        '<div><div style="font:600 10px var(--font-mono);color:#6E675C;letter-spacing:.06em;margin-bottom:6px;">ERROR</div><div style="border-radius:12px;padding:10px 12px;background:#FBE9E7;color:#8A2B18;font-size:11px;display:flex;gap:8px;align-items:center;">Payment did not go through. Retry or switch method.</div></div>' +
+        '<div><div style="font:600 10px var(--font-mono);color:#6E675C;letter-spacing:.06em;margin-bottom:6px;">SUCCESS</div><div style="border-radius:12px;padding:10px 12px;background:#E1EFE8;color:#0F5741;font-size:11px;">Pro assigned. Arrives in ~6 min.</div></div>' +
+        '</div>'
+    });
+
+    /* ── Row 3: DESIGN DELIVERABLES ── */
+    const r3Start = maxY([colorCard, typeCard, compCard, handoffCard, statesCard], 84);
+    addSection(r3Start, UI_STRINGS.sections.deliverables);
+
+    const rowsData = [
+      { stage: 'Getting started', sub: 'Splash to your first address. OTP login, no passwords.', items: [
+        ['tpl-splash', 'Splash', 'auto'], ['tpl-onboard', 'Onboarding', 'Get started'], ['tpl-login', 'Login', 'Send OTP'],
+        ['tpl-otp', 'Verify OTP', 'Verify'], ['tpl-address', 'Set address', 'Confirm'] ] },
+      { stage: 'Find and book', sub: 'Browse a trade, price a task, pick a slot, pay on completion.', items: [
+        ['tpl-home', 'Home', 'Pick a trade'], ['tpl-servicelist', 'Service list', 'Pick a task'], ['tpl-servicedetail', 'Service detail', 'Continue'],
+        ['tpl-schedule', 'Schedule', 'Continue'], ['tpl-reviewpay', 'Review & pay', 'Confirm'] ] },
+      { stage: 'Service day', sub: 'Match, track, start with a code, work billed by the hour.', items: [
+        ['tpl-matching', 'Matching', 'Pro found'], ['tpl-tracking', 'Live tracking', 'Pro arrives'], ['tpl-startotp', 'Start code', 'Verified'],
+        ['tpl-progress', 'In progress', 'Job done'], ['tpl-bill', 'Bill & pay', 'Paid'], ['tpl-rate', 'Rate & review', 'Done'] ] },
+      { stage: 'Manage', sub: 'Everything after the job: receipts, chat, money, perks.', items: [
+        ['tpl-bookings', 'Bookings', 'Open'], ['tpl-bookingdetail', 'Receipt', 'Message'], ['tpl-chat', 'Chat', ''],
+        ['tpl-wallet', 'Wallet', ''], ['tpl-membership', 'Membership', ''] ] },
+      { stage: 'Account and help', sub: 'Invites, identity, preferences, and a way to reach us.', items: [
+        ['tpl-referral', 'Referral', ''], ['tpl-profile', 'Profile', ''], ['tpl-settings', 'Settings', ''], ['tpl-support', 'Support', ''] ] },
+    ];
+
+    let rowY = r3Start + 60;
+    rowsData.forEach(row => {
+      const t = addTitle(100, rowY, row.stage, { fontSize: 20, fontWeight: 600 });
+      const d = addText(100, below(t, 6), row.sub, { fontSize: 13, maxWidth: 560 });
+      const pagesY = below(d, 22);
+      row.items.forEach((it, i) => {
+        const x = 100 + i * 454;
+        addPage(x, pagesY, 390, 844, it[1], page(it[0]));
+        if (i < row.items.length - 1 && it[2]) {
+          addTitle(x + 400, pagesY + 386, '→', { fontSize: 24, fontWeight: 400, color: 'rgba(232,230,227,0.45)' });
+          addTitle(x + 392, pagesY + 422, it[2], { fontSize: 11, fontWeight: 400, color: 'rgba(232,230,227,0.32)' });
+        }
+      });
+      rowY = pagesY + 844 + 40 + 110;
+    });
+
+    addNote(100, rowY - 40, 'Next step',
+      'The interactive prototype replays this exact journey end to end with working states: OTP, slots, coupon, matching, a live hourly meter, tips, rating, and the money trail through Wallet. Screens and prototype share one token set, so a reskin or a dark mode is a token swap.');
+  }
+
+  initScene();
+
+  panX = 40; panY = 24;
+  updateTransform();
+})();
+</script>
+</body>
+</html>

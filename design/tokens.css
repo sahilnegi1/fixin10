@@ -1,0 +1,59 @@
+/* FixIn10 design tokens (v2)
+   Roles and usage rules: docs/03-design-system.md
+   Port 1:1 to Flutter ThemeData / ColorScheme. No gradients inside app screens. */
+
+:root {
+  /* Colour */
+  --fx-bg: #F7F6F0;           /* warm paper background */
+  --fx-surface: #FFFFFF;      /* cards, sheets */
+  --fx-ink: #1F1B16;          /* primary text */
+  --fx-muted: #6E675C;        /* secondary text */
+  --fx-border: #E7E2D6;       /* hairlines */
+  --fx-accent: #146B52;       /* single accent: CTAs, selection */
+  --fx-accent-soft: #E1EFE8;  /* tinted backgrounds */
+  --fx-accent-deep: #0F5741;  /* accent text on tinted surfaces */
+  --fx-success: #16A34A;      /* runtime only */
+  --fx-danger: #DC2626;       /* runtime only */
+
+  /* Type */
+  --fx-font-display: 'Iowan Old Style', Charter, Georgia, 'Times New Roman', serif;
+  --fx-font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --fx-font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
+
+  /* Type scale (px) */
+  --fx-text-h1: 25px;
+  --fx-text-h2: 21px;
+  --fx-text-body: 15px;
+  --fx-text-small: 13.5px;
+  --fx-text-meta: 12px;
+  --fx-text-micro: 10px;
+
+  /* Shape */
+  --fx-radius-card: 16px;
+  --fx-radius-btn: 14px;
+  --fx-radius-cell: 12px;
+  --fx-radius-chip: 999px;
+
+  /* Spacing (4px grid) */
+  --fx-space-1: 4px;
+  --fx-space-2: 8px;
+  --fx-space-3: 12px;
+  --fx-space-4: 16px;
+  --fx-space-5: 20px;
+  --fx-space-6: 24px;
+
+  /* Motion */
+  --fx-motion-fast: 150ms;
+  --fx-motion-base: 200ms;
+  --fx-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Accessibility */
+  --fx-tap-min: 48px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fx-motion-fast: 0.01ms;
+    --fx-motion-base: 0.01ms;
+  }
+}
